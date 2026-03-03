@@ -1,5 +1,9 @@
 using System.Collections;
 using UnityEngine;
+using MQTTnet;
+using MQTTnet.Client;
+using System.Text;
+using System.Threading.Tasks;
 
 public class SwitchTrackSequence : MonoBehaviour
 {
@@ -27,43 +31,76 @@ public class SwitchTrackSequence : MonoBehaviour
     public Animator switchAnimator;
     public string toggleTriggerName = "Toggle";
 
-    private void Start()
+    // ================= MQTT =================
+    private IMqttClient mqttClient;
+    private string mqttBrokerIP = "10.160.121.143";
+    private int mqttPort = 1883;
+
+    async void Start()
     {
+        await SetupMQTT();
         StartCoroutine(RunSequence());
     }
+
+    private async Task SetupMQTT()
+{
+    var factory = new MqttFactory();
+    mqttClient = factory.CreateMqttClient();
+
+    var options = new MqttClientOptionsBuilder()
+        .WithTcpServer("10.160.121.143", 1883)
+        .WithCleanSession()
+        .Build();
+
+    await mqttClient.ConnectAsync(options);
+    Debug.Log("MQTT Connected");
+}
+
+    private async Task PublishBeamState(string beamName, int state)
+{
+    if (mqttClient == null || !mqttClient.IsConnected)
+        return;
+
+    string payload = "{\"id\":\"" + beamName + "\",\"state\":" + state + "}";
+
+    var message = new MqttApplicationMessageBuilder()
+        .WithTopic("wayside/beam")
+        .WithPayload(Encoding.UTF8.GetBytes(payload))
+        .WithQualityOfServiceLevel(
+            MQTTnet.Protocol.MqttQualityOfServiceLevel.AtLeastOnce
+        )
+        .Build();
+
+    await mqttClient.PublishAsync(message);
+
+    Debug.Log("MQTT Sent: " + payload);
+}
 
     // =====================================================
     // MAIN SEQUENCE
     // =====================================================
     private IEnumerator RunSequence()
-{
-    // Move along Track A until SwitchBeam
-    yield return MoveUntilBeam(trackA, switchBeamName);
+    {
+        yield return MoveUntilBeam(trackA, switchBeamName);
 
-    yield return new WaitForSeconds(delayBeforeSwitching);
+        yield return new WaitForSeconds(delayBeforeSwitching);
 
-    // Toggle switch to Diverge
-    switchAnimator.SetTrigger(toggleTriggerName);
+        switchAnimator.SetTrigger(toggleTriggerName);
 
-    // Wait until animation finishes
-    yield return WaitForAnimationState("Diverge");
+        yield return WaitForAnimationState("Diverge");
 
-    // ADD WAIT HERE
-    yield return new WaitForSeconds(delayBeforeTrackB);
+        yield return new WaitForSeconds(delayBeforeTrackB);
 
-    // Move along Track B until ExitBeam
-    yield return MoveUntilBeam(trackB, exitBeamName);
+        yield return MoveUntilBeam(trackB, exitBeamName);
 
-    // ADD WAIT HERE
-    yield return new WaitForSeconds(delayBeforeSwitching);
+        yield return new WaitForSeconds(delayBeforeSwitching);
 
-    // Toggle switch back to Straight
-    switchAnimator.SetTrigger(toggleTriggerName);
+        switchAnimator.SetTrigger(toggleTriggerName);
 
-    yield return WaitForAnimationState("Straight");
+        yield return WaitForAnimationState("Straight");
 
-    Debug.Log("Sequence Complete");
-}
+        Debug.Log("Sequence Complete");
+    }
 
     // =====================================================
     // MOVE UNTIL SPECIFIC BEAM
@@ -71,7 +108,6 @@ public class SwitchTrackSequence : MonoBehaviour
     private IEnumerator MoveUntilBeam(Transform[] waypoints, string requiredBeam)
     {
         lastBeamHit = "";
-
         int index = 0;
 
         while (lastBeamHit != requiredBeam && index < waypoints.Length)
@@ -105,25 +141,27 @@ public class SwitchTrackSequence : MonoBehaviour
     private IEnumerator WaitForAnimationState(string stateName)
     {
         while (!switchAnimator.GetCurrentAnimatorStateInfo(0).IsName(stateName))
-        {
             yield return null;
-        }
 
         while (switchAnimator.GetCurrentAnimatorStateInfo(0).normalizedTime < 1.0f)
-        {
             yield return null;
-        }
     }
 
     // =====================================================
     // BEAM DETECTION
     // =====================================================
-    private void OnTriggerEnter(Collider other)
+    private async void OnTriggerEnter(Collider other)
     {
         if (!other.CompareTag(beamTag))
             return;
 
-        lastBeamHit = other.name;
-        Debug.Log("Beam Broken: " + other.name);
+    if (other.name == switchBeamName)
+    {
+        await PublishBeamState(other.name, 1);
+    }
+    else if (other.name == exitBeamName)
+    {
+        await PublishBeamState(switchBeamName, 0);
+    }
     }
 }
