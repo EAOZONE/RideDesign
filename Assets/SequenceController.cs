@@ -4,93 +4,126 @@ using UnityEngine;
 public class SwitchTrackSequence : MonoBehaviour
 {
     [Header("Cube")]
-    public Transform cube;
+    public Rigidbody cubeRB;
     public float moveSpeed = 1.5f;
     public float arriveEpsilon = 0.01f;
 
     [Header("Waypoints")]
-    public Transform[] trackA;   // up to the switch
-    public Transform[] trackB;   // after the switch
+    public Transform[] trackA;
+    public Transform[] trackB;
 
-    [Header("Switch Track (choose one approach)")]
-    public Animator switchAnimator;     // Option A
+    [Header("Beam Breakers")]
+    public string beamTag = "BeamBreak";
+    public string switchBeamName = "SwitchBeam";
+    public string exitBeamName = "ExitBeam";
+
+    private string lastBeamHit = "";
+
+    [Header("Delays")]
+    public float delayBeforeSwitching = 1.0f;
+    public float delayBeforeTrackB = 1.0f;
+
+    [Header("Switch Track")]
+    public Animator switchAnimator;
     public string toggleTriggerName = "Toggle";
-
-    // Option B (code-driven switch)
-    public Transform switchRoot;
-    public Transform switchStateStraight;
-    public Transform switchStateDiverge;
-    public float switchTime = 0.5f;
-
-    public bool useAnimator = true;
 
     private void Start()
     {
         StartCoroutine(RunSequence());
     }
 
+    // =====================================================
+    // MAIN SEQUENCE
+    // =====================================================
     private IEnumerator RunSequence()
+{
+    // Move along Track A until SwitchBeam
+    yield return MoveUntilBeam(trackA, switchBeamName);
+
+    yield return new WaitForSeconds(delayBeforeSwitching);
+
+    // Toggle switch to Diverge
+    switchAnimator.SetTrigger(toggleTriggerName);
+
+    // Wait until animation finishes
+    yield return WaitForAnimationState("Diverge");
+
+    // ADD WAIT HERE
+    yield return new WaitForSeconds(delayBeforeTrackB);
+
+    // Move along Track B until ExitBeam
+    yield return MoveUntilBeam(trackB, exitBeamName);
+
+    // ADD WAIT HERE
+    yield return new WaitForSeconds(delayBeforeSwitching);
+
+    // Toggle switch back to Straight
+    switchAnimator.SetTrigger(toggleTriggerName);
+
+    yield return WaitForAnimationState("Straight");
+
+    Debug.Log("Sequence Complete");
+}
+
+    // =====================================================
+    // MOVE UNTIL SPECIFIC BEAM
+    // =====================================================
+    private IEnumerator MoveUntilBeam(Transform[] waypoints, string requiredBeam)
     {
-        // 1) Move cube through first track to the switch
-        yield return MoveAlong(trackA);
+        lastBeamHit = "";
 
-        // 2) Switch track
-        if (useAnimator && switchAnimator != null)
+        int index = 0;
+
+        while (lastBeamHit != requiredBeam && index < waypoints.Length)
         {
-            switchAnimator.SetTrigger(toggleTriggerName);
+            Vector3 targetPos = waypoints[index].position;
 
-            // If you have an animation length, either:
-            // - wait a fixed time that matches it, or
-            // - use Animation Events to signal completion.
-            yield return new WaitForSeconds(switchTime);
-        }
-        else
-        {
-            // Code-driven switch (lerp from straight to diverge)
-            yield return LerpTransform(switchRoot, switchStateDiverge, switchTime);
+            while ((cubeRB.position - targetPos).sqrMagnitude > arriveEpsilon * arriveEpsilon)
+            {
+                if (lastBeamHit == requiredBeam)
+                    yield break;
+
+                Vector3 newPos = Vector3.MoveTowards(
+                    cubeRB.position,
+                    targetPos,
+                    moveSpeed * Time.fixedDeltaTime
+                );
+
+                cubeRB.MovePosition(newPos);
+                yield return new WaitForFixedUpdate();
+            }
+
+            index++;
         }
 
-        // 3) Move cube through next track
-        yield return MoveAlong(trackB);
+        Debug.Log("Arrived at beam: " + requiredBeam);
     }
 
-    private IEnumerator MoveAlong(Transform[] waypoints)
+    // =====================================================
+    // WAIT FOR ANIMATOR STATE
+    // =====================================================
+    private IEnumerator WaitForAnimationState(string stateName)
     {
-        foreach (var wp in waypoints)
+        while (!switchAnimator.GetCurrentAnimatorStateInfo(0).IsName(stateName))
         {
-            yield return MoveTo(cube, wp.position);
-        }
-    }
-
-    private IEnumerator MoveTo(Transform obj, Vector3 targetPos)
-    {
-        // Move with constant speed, frame-rate independent
-        while ((obj.position - targetPos).sqrMagnitude > arriveEpsilon * arriveEpsilon)
-        {
-            obj.position = Vector3.MoveTowards(obj.position, targetPos, moveSpeed * Time.deltaTime);
             yield return null;
         }
-        obj.position = targetPos;
-    }
 
-    private IEnumerator LerpTransform(Transform root, Transform target, float duration)
-    {
-        Vector3 startPos = root.position;
-        Quaternion startRot = root.rotation;
-
-        Vector3 endPos = target.position;
-        Quaternion endRot = target.rotation;
-
-        float t = 0f;
-        while (t < 1f)
+        while (switchAnimator.GetCurrentAnimatorStateInfo(0).normalizedTime < 1.0f)
         {
-            t += Time.deltaTime / Mathf.Max(0.0001f, duration);
-            root.position = Vector3.Lerp(startPos, endPos, t);
-            root.rotation = Quaternion.Slerp(startRot, endRot, t);
             yield return null;
         }
+    }
 
-        root.position = endPos;
-        root.rotation = endRot;
+    // =====================================================
+    // BEAM DETECTION
+    // =====================================================
+    private void OnTriggerEnter(Collider other)
+    {
+        if (!other.CompareTag(beamTag))
+            return;
+
+        lastBeamHit = other.name;
+        Debug.Log("Beam Broken: " + other.name);
     }
 }
