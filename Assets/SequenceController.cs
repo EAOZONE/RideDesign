@@ -18,7 +18,7 @@ public class SwitchTrackSequence : MonoBehaviour
 
     [Header("Beam Breakers")]
     public string beamTag = "BeamBreak";
-    public string switchBeamName = "SwitchBeam";
+    public string switchBeamName = "SwitchTrack";
     public string exitBeamName = "ExitBeam";
 
     private string lastBeamHit = "";
@@ -33,7 +33,7 @@ public class SwitchTrackSequence : MonoBehaviour
 
     // ================= MQTT =================
     private IMqttClient mqttClient;
-    private string mqttBrokerIP = "10.160.121.143";
+    private string mqttBrokerIP = "10.160.121.73";
     private int mqttPort = 1883;
 
     async void Start()
@@ -48,7 +48,7 @@ public class SwitchTrackSequence : MonoBehaviour
     mqttClient = factory.CreateMqttClient();
 
     var options = new MqttClientOptionsBuilder()
-        .WithTcpServer("10.160.121.143", 1883)
+        .WithTcpServer("10.160.121.73", 1883)
         .WithCleanSession()
         .Build();
 

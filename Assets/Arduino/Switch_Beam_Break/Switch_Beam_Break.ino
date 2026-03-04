@@ -11,7 +11,7 @@ const char* password = "vszu6851";
 // --------------------
 // MQTT Settings
 // --------------------
-const char* mqtt_server = "10.160.121.143";  // PC running Mosquitto
+const char* mqtt_server = "10.160.121.73";
 const int mqtt_port = 1883;
 
 WiFiClient wifiClient;
@@ -20,8 +20,11 @@ PubSubClient client(wifiClient);
 // --------------------
 // Beam Settings
 // --------------------
-const int beamPin = 2;
-bool lastBeamState = HIGH;
+const int beamStartPin = 2;   // START trigger
+const int beamEndPin   = 3;   // END trigger
+
+bool lastStartState = HIGH;
+bool lastEndState   = HIGH;
 
 // --------------------
 // Servo Settings
@@ -42,18 +45,17 @@ void callback(char* topic, byte* payload, unsigned int length)
 
   Serial.println("Received: " + message);
 
-  // Check ID first
   if (message.indexOf("\"id\":\"SwitchBeam\"") != -1)
   {
     if (message.indexOf("\"state\":1") != -1)
     {
-      Serial.println("SwitchBeam → 90°");
+      Serial.println("SwitchTrack → 90°");
       testServo.write(90);
     }
 
     if (message.indexOf("\"state\":0") != -1)
     {
-      Serial.println("SwitchBeam → 0°");
+      Serial.println("SwitchTrack → 0°");
       testServo.write(0);
     }
   }
@@ -128,10 +130,11 @@ void setup() {
   Serial.begin(115200);
   delay(2000);
 
-  pinMode(beamPin, INPUT_PULLUP);
+  pinMode(beamStartPin, INPUT_PULLUP);
+  pinMode(beamEndPin, INPUT_PULLUP);
 
   testServo.attach(servoPin);
-  testServo.write(0);   // start at 0°
+  testServo.write(0);
 
   connectWiFi();
 
@@ -157,31 +160,34 @@ void loop() {
 
   client.loop();
 
-  bool currentBeamState = digitalRead(beamPin);
+  bool currentStart = digitalRead(beamStartPin);
+  bool currentEnd   = digitalRead(beamEndPin);
 
-  // Falling edge detection (beam broken)
-  if (lastBeamState == HIGH && currentBeamState == LOW) {
+  // --------------------
+  // START beam triggered
+  // --------------------
+  if (lastStartState == HIGH && currentStart == LOW) {
 
-    Serial.println("Beam Broken!");
+    Serial.println("SwitchBeam START");
+    delay(300);
+    testServo.write(90);
 
-    bool success = client.publish(
+    client.publish(
       "wayside/beam",
       "{\"id\":\"SwitchBeam\",\"state\":1}"
     );
 
-    if (success) {
-      Serial.println("MQTT publish success");
-    } else {
-      Serial.println("MQTT publish FAILED");
-    }
-
     delay(100);
   }
 
-  // Rising edge detection (beam restored)
-  if (lastBeamState == LOW && currentBeamState == HIGH) {
+  // --------------------
+  // END beam triggered
+  // --------------------
+  if (lastEndState == HIGH && currentEnd == LOW) {
 
-    Serial.println("Beam Restored!");
+    Serial.println("SwitchBeam END");
+    delay(300);
+    testServo.write(0);
 
     client.publish(
       "wayside/beam",
@@ -191,5 +197,6 @@ void loop() {
     delay(100);
   }
 
-  lastBeamState = currentBeamState;
+  lastStartState = currentStart;
+  lastEndState   = currentEnd;
 }
