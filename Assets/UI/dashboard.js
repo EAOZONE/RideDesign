@@ -1,18 +1,22 @@
+// Change based on computer using
 const client = mqtt.connect("ws://10.160.121.73:9001");
 
 const vehicle = document.getElementById("vehicle");
 
 const positions = {
 
-    Midtown: [330,110],
-    Lake: [360,300],
-    Baseball: [540,250],
-    Library: [750,130],
-    CT: [730,460],
-    Station: [360,520],
 
-    SwitchTrack: [540,250],
-    ExitBeam: [730,460]
+    Station1: [240, 445],
+    Station2: [380, 445],
+    Centry: [700, 445],
+    Switch1: [780, 100],
+    Switch2: [720, 90],
+    Rotate1: [530, 90],
+    Rotate2: [500, 110],
+    Basket: [450, 190],
+    Mid: [180, 50],
+    Drop1: [70, 140],
+    Drop2: [65, 370]
 
 };
 
