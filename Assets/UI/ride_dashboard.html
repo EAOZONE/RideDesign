@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+
+<script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+
+<style>
+
+body{
+background:#111;
+color:white;
+font-family:Arial;
+text-align:center;
+}
+
+#container{
+position:relative;
+width:900px;
+margin:auto;
+}
+
+#map{
+width:900px;
+}
+
+#overlay{
+position:absolute;
+top:0;
+left:0;
+}
+
+.vehicle{
+fill:yellow;
+stroke:black;
+stroke-width:2;
+}
+
+.sensor{
+fill:white;
+}
+
+</style>
+
+</head>
+
+<body>
+
+<h2>Ride Tracker</h2>
+
+<div id="container">
+
+<img id="map" src="track_map.jpg">
+
+<svg id="overlay" width="900" height="600">
+
+<!-- sensor dots -->
+
+<circle id="MidtownDot" class="sensor" cx="330" cy="110" r="6"/>
+<circle id="LakeDot" class="sensor" cx="360" cy="300" r="6"/>
+<circle id="BaseballDot" class="sensor" cx="540" cy="250" r="6"/>
+<circle id="LibraryDot" class="sensor" cx="750" cy="130" r="6"/>
+<circle id="CTDot" class="sensor" cx="730" cy="460" r="6"/>
+<circle id="StationDot" class="sensor" cx="360" cy="520" r="6"/>
+
+<!-- vehicle -->
+
+<circle id="vehicle" class="vehicle" cx="360" cy="520" r="12"/>
+
+</svg>
+
+</div>
+
+<script src="dashboard.js"></script>
+
+</body>
+
+</html>
