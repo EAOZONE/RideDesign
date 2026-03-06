@@ -2,7 +2,7 @@ import json
 import time
 import paho.mqtt.client as mqtt
 
-BROKER = "10.51.222.143"
+BROKER = "localhost"
 PORT = 1883
 
 # -----------------------------
@@ -12,8 +12,12 @@ PORT = 1883
 ride_mode = "manual"
 estop_active = False
 
-vehicles = {}
-sensors = {}
+vehicles = {0:{}, 1:{}}
+sensors = {"Station1":0, "Station2":0, "Centry":0, "Switch1":0, "Switch2":0,
+           "Rotate1":0, "Rotate2":0, "Basket":0, "Mid":0, "Drop1":0, "Drop2":0}
+
+switch_waiting_for_alignment = False
+switch_waiting_for_clear = False
 
 # -----------------------------
 # MQTT CLIENT
@@ -89,6 +93,8 @@ def handle_sensor(topic, data):
 
     sensors[sensor_id] = state
 
+    print(sensor_id)
+    print(sensors[sensor_id])
     print("Sensor", sensor_id, "=", state)
 
     if ride_mode == "automatic" and not estop_active:
@@ -108,16 +114,35 @@ def process_sensor(sensor_id, state):
 
     # Example logic
 
-    if sensor_id == "1":
+    if sensor_id == "Switch1":
+        global switch_waiting_for_alignment
 
-        print("Switch track")
+        print("Switch track triggered")
+
+        drive_vehicle(0, 0.0)
 
         client.publish(
             "ride/actuator/switchTrack/command",
-            json.dumps({"angle":90})
+            json.dumps({"angle": 90})
         )
 
-    if sensor_id == "2":
+        switch_waiting_for_alignment = True
+
+    if sensor_id == "Switch2":
+
+        global switch_waiting_for_clear
+
+        if switch_waiting_for_clear:
+            print("Vehicle clear of switch, resetting track")
+
+            client.publish(
+                "ride/actuator/switchTrack/command",
+                json.dumps({"angle": 0})
+            )
+
+            switch_waiting_for_clear = False
+
+    if sensor_id == "Rotate1":
 
         print("Rotate track")
 
@@ -126,7 +151,7 @@ def process_sensor(sensor_id, state):
             json.dumps({"angle":90})
         )
 
-    if sensor_id == "3":
+    if sensor_id == "Drop1":
 
         print("Drop track")
 
@@ -159,9 +184,27 @@ def handle_vehicle_state(topic, data):
 
 def handle_actuator_state(topic, data):
 
+    global switch_waiting_for_alignment
+    global switch_waiting_for_clear
+
     actuator = topic.split("/")[2]
 
     print("Actuator", actuator, "state:", data)
+
+    if actuator == "switchTrack":
+
+        angle = data.get("angle", None)
+        moving = data.get("moving", False)
+
+        # Servo reached switched position
+        if switch_waiting_for_alignment and angle == 90 and not moving:
+
+            print("Switch track aligned, moving vehicle")
+
+            drive_vehicle(0, 0.4)
+
+            switch_waiting_for_alignment = False
+            switch_waiting_for_clear = True
 
 
 # -----------------------------
@@ -206,7 +249,7 @@ def drive_vehicle(vehicle_id, speed):
     payload = {
         "speed": speed
     }
-
+    print("Publish drive", topic, payload)
     client.publish(topic, json.dumps(payload))
 
 

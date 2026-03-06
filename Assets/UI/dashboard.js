@@ -1,10 +1,9 @@
 // Change based on computer using
-const client = mqtt.connect("ws://10.51.222.143:9001");
+const client = mqtt.connect("ws://localhost:9001");
 
 const vehicle = document.getElementById("vehicle");
 
 const positions = {
-
 
     Station1: [240, 445],
     Station2: [380, 445],
@@ -24,35 +23,34 @@ client.on("connect", () => {
 
     console.log("Connected to MQTT");
 
-    client.subscribe("wayside/beam");
+    // Subscribe to all sensor state messages
+    client.subscribe("ride/sensor/+/state");
 
 });
 
 client.on("message", (topic, message) => {
 
     const raw = message.toString();
-    console.log("MQTT message:", raw);
 
-    let id = null;
-    let state = 0;
+    console.log("MQTT message:", topic, raw);
+
+    let data;
 
     try {
-        // Try normal JSON first
-        const data = JSON.parse(raw);
-        id = data.id;
-        state = data.state;
-    }
-    catch(e){
-        // Fallback parser for {id:SwitchTrack,state:1}
-        const match = raw.match(/id:([^,}]+).*state:(\d+)/);
-        if(match){
-            id = match[1];
-            state = parseInt(match[2]);
-        }
+        data = JSON.parse(raw);
+    } catch (e) {
+        console.log("Bad JSON:", raw);
+        return;
     }
 
+    const state = data.state;
+
+    // Extract sensor name from topic
+    const parts = topic.split("/");
+    const sensorId = parts[2];
+
     if(state === 1){
-        moveVehicle(id);
+        moveVehicle(sensorId);
     }
 
 });
