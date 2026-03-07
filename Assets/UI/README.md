@@ -326,7 +326,22 @@ Incorrect:
 
 ---
 
-# 12. Recommended Debug Tool
+# 12. Using HTML + Python
+Run python code:
+
+```python ride_control.py```
+
+Open HTML file should open in a new tab
+
+Utilizing the terminal type in different commands such as
+
+```mosquitto_pub -h localhost -t ride/sensor/Switch1/state -m '{\"state\":1}'```
+
+You should see the yellow dot travel around.
+
+---
+
+# 13. Recommended Debug Tool
 
 To monitor the entire ride network in real time:
 
