@@ -2,7 +2,7 @@ import json
 import time
 import paho.mqtt.client as mqtt
 
-BROKER = "localhost"
+BROKER = "10.51.222.143"
 PORT = 1883
 
 # -----------------------------
@@ -97,7 +97,7 @@ def handle_sensor(topic, data):
     print(sensors[sensor_id])
     print("Sensor", sensor_id, "=", state)
 
-    if ride_mode == "automatic" and not estop_active:
+    if not estop_active:
         process_sensor(sensor_id, state)
 
 
