@@ -33,7 +33,7 @@ public class SwitchTrackSequence : MonoBehaviour
 
     // ================= MQTT =================
     private IMqttClient mqttClient;
-    private string mqttBrokerIP = "10.160.121.73";
+    private string mqttBrokerIP = "localhost";
     private int mqttPort = 1883;
 
     async void Start()
@@ -48,7 +48,7 @@ public class SwitchTrackSequence : MonoBehaviour
     mqttClient = factory.CreateMqttClient();
 
     var options = new MqttClientOptionsBuilder()
-        .WithTcpServer("10.160.121.73", 1883)
+        .WithTcpServer(mqttBrokerIP, mqttPort)
         .WithCleanSession()
         .Build();
 
