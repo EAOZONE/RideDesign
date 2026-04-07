@@ -1,0 +1,5 @@
+{
+  "name": "Ride Control Dashboard",
+  "description": "Real-time MQTT-based dashboard for ride control, vehicle telemetry, and live camera feeds.",
+  "requestFramePermissions": []
+}
