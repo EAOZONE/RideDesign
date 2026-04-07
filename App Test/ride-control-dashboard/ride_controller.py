@@ -1,63 +1,78 @@
 import json
 import time
+from typing import Any
+
 import paho.mqtt.client as mqtt
 
-BROKER = "localhost"
+BROKER = "192.168.1.115"  # Change to your Mosquitto broker IP if needed.
 PORT = 1883
 
-# -----------------------------
-# GLOBAL STATE
-# -----------------------------
+TRACK_ACTUATOR_DEFAULTS = {
+    "switchTrack": {"target_angle": 0},
+    "rotateTrack": {"target_angle": 0},
+    "dropTrack": {
+        "target": "top",
+        "motor_a_speed": 0,
+        "motor_b_speed": 0,
+    },
+}
+
+SENSOR_IDS = [
+    "Station1",
+    "Switch1",
+    "Switch2",
+    "Rotate1",
+    "Drop1",
+    "Station2",
+]
+
+VEHICLE_IDS = ["0"]
 
 ride_mode = "manual"
 estop_active = False
 
-vehicles = {0:{}, 1:{}}
-sensors = {"Station1":0, "Station2":0, "Centry":0, "Switch1":0, "Switch2":0,
-           "Rotate1":0, "Rotate2":0, "Basket":0, "Mid":0, "Drop1":0, "Drop2":0}
+vehicles: dict[str, dict[str, Any]] = {
+    vehicle_id: {
+        "drive": {"speed": 0.0, "left_speed": 0, "right_speed": 0, "moving": False},
+        "servoYaw": {"angle": 90},
+        "servoPitch": {"angle": 90},
+        "last_seen": 0.0,
+    }
+    for vehicle_id in VEHICLE_IDS
+}
+
+sensors: dict[str, int] = {sensor_id: 0 for sensor_id in SENSOR_IDS}
+
+actuators: dict[str, dict[str, Any]] = {
+    name: payload.copy() for name, payload in TRACK_ACTUATOR_DEFAULTS.items()
+}
 
 switch_waiting_for_alignment = False
 switch_waiting_for_clear = False
 
-# -----------------------------
-# MQTT CLIENT
-# -----------------------------
-
 client = mqtt.Client(client_id="ride_controller")
 
-# -----------------------------
-# CONNECT
-# -----------------------------
 
-def on_connect(client, userdata, flags, rc):
+def publish_json(topic: str, payload: dict[str, Any]) -> None:
+    print("TX:", topic, payload)
+    client.publish(topic, json.dumps(payload))
+
+
+def on_connect(client_obj, userdata, flags, rc):
     print("Connected to MQTT with code:", rc)
 
-    # Sensors
-    client.subscribe("ride/sensor/+/state")
-
-    # Vehicle state
-    client.subscribe("ride/vehicle/+/drive/state")
-    client.subscribe("ride/vehicle/+/servoYaw/state")
-    client.subscribe("ride/vehicle/+/servoPitch/state")
-
-    # System control
-    client.subscribe("ride/system/#")
-
-    # Actuator state
-    client.subscribe("ride/actuator/+/state")
+    client_obj.subscribe("ride/sensor/+/state")
+    client_obj.subscribe("ride/vehicle/+/+/state")
+    client_obj.subscribe("ride/actuator/+/state")
+    client_obj.subscribe("ride/system/#")
 
 
-# -----------------------------
-# MESSAGE RECEIVED
-# -----------------------------
-
-def on_message(client, userdata, msg):
-
+def on_message(client_obj, userdata, msg):
     topic = msg.topic
 
     try:
         data = json.loads(msg.payload.decode())
-    except:
+    except json.JSONDecodeError:
         print("Bad JSON:", msg.payload)
         return
 
@@ -65,269 +80,239 @@ def on_message(client, userdata, msg):
 
     if topic.startswith("ride/sensor/"):
         handle_sensor(topic, data)
-
     elif topic.startswith("ride/vehicle/"):
         handle_vehicle_state(topic, data)
-
     elif topic.startswith("ride/actuator/"):
         handle_actuator_state(topic, data)
-
     elif topic == "ride/system/estop":
         handle_estop(data)
-
     elif topic == "ride/system/mode":
         handle_mode(data)
-
     elif topic == "ride/system/reset":
         handle_reset()
 
 
-# -----------------------------
-# SENSOR HANDLING
-# -----------------------------
-
-def handle_sensor(topic, data):
-
+def handle_sensor(topic: str, data: dict[str, Any]) -> None:
     sensor_id = topic.split("/")[2]
-    state = data["state"]
+    state = int(data.get("state", 0))
 
     sensors[sensor_id] = state
-
-    print(sensor_id)
-    print(sensors[sensor_id])
     print("Sensor", sensor_id, "=", state)
 
     if not estop_active:
         process_sensor(sensor_id, state)
 
 
-# -----------------------------
-# SENSOR LOGIC
-# -----------------------------
-
-def process_sensor(sensor_id, state):
+def process_sensor(sensor_id: str, state: int) -> None:
+    global switch_waiting_for_alignment
+    global switch_waiting_for_clear
 
     if state != 1:
         return
 
     print("Triggered sensor:", sensor_id)
 
-    # Example logic
+    if sensor_id == "Station1":
+        drive_vehicle("0", speed=0.35)
 
-    if sensor_id == "Switch1":
-        global switch_waiting_for_alignment
-
-        print("Switch track triggered")
-
-        drive_vehicle(0, 0.0)
-
-        client.publish(
-            "ride/actuator/switchTrack/command",
-            json.dumps({"angle": 90})
-        )
-
+    elif sensor_id == "Switch1":
+        drive_vehicle("0", speed=0.0)
+        command_switch_track(90)
         switch_waiting_for_alignment = True
 
-    if sensor_id == "Switch2":
+    elif sensor_id == "Switch2" and switch_waiting_for_clear:
+        command_switch_track(0)
+        switch_waiting_for_clear = False
 
-        global switch_waiting_for_clear
+    elif sensor_id == "Rotate1":
+        drive_vehicle("0", speed=0.0)
+        command_turntable(90)
 
-        if switch_waiting_for_clear:
-            print("Vehicle clear of switch, resetting track")
+    elif sensor_id == "Drop1":
+        drive_vehicle("0", speed=0.0)
+        command_drop_track("bottom", motor_a_speed=180, motor_b_speed=180)
 
-            client.publish(
-                "ride/actuator/switchTrack/command",
-                json.dumps({"angle": 0})
-            )
-
-            switch_waiting_for_clear = False
-
-    if sensor_id == "Rotate1":
-
-        print("Rotate track")
-
-        client.publish(
-            "ride/actuator/rotateTrack/command",
-            json.dumps({"angle":90})
-        )
-
-    if sensor_id == "Drop1":
-
-        print("Drop track")
-
-        client.publish(
-            "ride/actuator/dropTrack/command",
-            json.dumps({"position":"bottom"})
-        )
+    elif sensor_id == "Station2":
+        drive_vehicle("0", speed=0.0)
+        set_yaw("0", 90)
+        set_pitch("0", 90)
 
 
-# -----------------------------
-# VEHICLE STATE
-# -----------------------------
-
-def handle_vehicle_state(topic, data):
-
+def handle_vehicle_state(topic: str, data: dict[str, Any]) -> None:
     parts = topic.split("/")
     vehicle_id = parts[2]
+    subsystem = parts[3]
 
     if vehicle_id not in vehicles:
-        vehicles[vehicle_id] = {}
+        vehicles[vehicle_id] = {
+            "drive": {},
+            "servoYaw": {},
+            "servoPitch": {},
+            "last_seen": 0.0,
+        }
 
-    vehicles[vehicle_id].update(data)
+    vehicles[vehicle_id][subsystem] = data
+    vehicles[vehicle_id]["last_seen"] = time.time()
+    print("Vehicle", vehicle_id, subsystem, data)
 
-    print("Vehicle", vehicle_id, vehicles[vehicle_id])
 
-
-# -----------------------------
-# ACTUATOR STATE
-# -----------------------------
-
-def handle_actuator_state(topic, data):
-
+def handle_actuator_state(topic: str, data: dict[str, Any]) -> None:
     global switch_waiting_for_alignment
     global switch_waiting_for_clear
 
     actuator = topic.split("/")[2]
-
+    actuators[actuator] = data
     print("Actuator", actuator, "state:", data)
 
     if actuator == "switchTrack":
-
-        angle = data.get("angle", None)
+        angle = data.get("angle")
         moving = data.get("moving", False)
 
-        # Servo reached switched position
         if switch_waiting_for_alignment and angle == 90 and not moving:
-
-            print("Switch track aligned, moving vehicle")
-
-            drive_vehicle(0, 0.4)
-
+            drive_vehicle("0", speed=0.35)
             switch_waiting_for_alignment = False
             switch_waiting_for_clear = True
 
+    elif actuator == "rotateTrack":
+        angle = data.get("angle")
+        moving = data.get("moving", False)
 
-# -----------------------------
-# SYSTEM COMMANDS
-# -----------------------------
+        if angle == 90 and not moving:
+            drive_vehicle("0", speed=0.30)
 
-def handle_estop(data):
+    elif actuator == "dropTrack":
+        target = data.get("target")
+        moving = data.get("moving", False)
 
+        if target == "bottom" and not moving:
+            drive_vehicle("0", speed=0.25)
+
+
+def handle_estop(data: dict[str, Any]) -> None:
     global estop_active
 
-    estop_active = data["active"]
+    estop_active = bool(data.get("active", False))
 
     if estop_active:
         print("!!! EMERGENCY STOP !!!")
         stop_all_vehicles()
+        command_drop_track("hold", motor_a_speed=0, motor_b_speed=0)
 
 
-def handle_mode(data):
-
+def handle_mode(data: dict[str, Any]) -> None:
     global ride_mode
 
-    ride_mode = data["mode"]
-
+    ride_mode = data.get("mode", "manual")
     print("Ride mode:", ride_mode)
 
 
-def handle_reset():
+def handle_reset() -> None:
+    global switch_waiting_for_alignment
+    global switch_waiting_for_clear
 
     print("System reset")
-
     stop_all_vehicles()
+    command_switch_track(0)
+    command_turntable(0)
+    command_drop_track("top", motor_a_speed=180, motor_b_speed=180)
+    switch_waiting_for_alignment = False
+    switch_waiting_for_clear = False
 
 
-# -----------------------------
-# VEHICLE COMMANDS
-# -----------------------------
-
-def drive_vehicle(vehicle_id, speed):
-
-    topic = f"ride/vehicle/{vehicle_id}/drive/command"
-
-    payload = {
-        "speed": speed
-    }
-    print("Publish drive", topic, payload)
-    client.publish(topic, json.dumps(payload))
-
-
-def set_yaw(vehicle_id, angle):
-
-    topic = f"ride/vehicle/{vehicle_id}/servoYaw/command"
+def drive_vehicle(
+    vehicle_id: str,
+    speed: float,
+    left_speed: int | None = None,
+    right_speed: int | None = None,
+) -> None:
+    if left_speed is None or right_speed is None:
+        pwm = max(-255, min(255, int(speed * 255)))
+        left_speed = pwm
+        right_speed = pwm
 
     payload = {
-        "angle": angle
+        "speed": speed,
+        "left_speed": left_speed,
+        "right_speed": right_speed,
     }
-
-    client.publish(topic, json.dumps(payload))
-
-
-def set_pitch(vehicle_id, angle):
-
-    topic = f"ride/vehicle/{vehicle_id}/servoPitch/command"
-
-    payload = {
-        "angle": angle
-    }
-
-    client.publish(topic, json.dumps(payload))
+    publish_json(f"ride/vehicle/{vehicle_id}/drive/command", payload)
 
 
-# -----------------------------
-# SAFETY
-# -----------------------------
-
-def stop_all_vehicles():
-
-    for vehicle_id in vehicles:
-        drive_vehicle(vehicle_id, 0)
-
-
-# -----------------------------
-# HEARTBEAT
-# -----------------------------
-
-def send_heartbeat():
-
-    client.publish(
-        "ride/controller/heartbeat",
-        json.dumps({"alive":True})
+def set_yaw(vehicle_id: str, angle: int) -> None:
+    publish_json(
+        f"ride/vehicle/{vehicle_id}/servoYaw/command",
+        {"angle": angle},
     )
 
 
-# -----------------------------
-# MAIN LOOP
-# -----------------------------
+def set_pitch(vehicle_id: str, angle: int) -> None:
+    publish_json(
+        f"ride/vehicle/{vehicle_id}/servoPitch/command",
+        {"angle": angle},
+    )
 
-def main():
 
+def command_switch_track(target_angle: int) -> None:
+    publish_json(
+        "ride/actuator/switchTrack/command",
+        {"target_angle": target_angle},
+    )
+
+
+def command_turntable(target_angle: int) -> None:
+    publish_json(
+        "ride/actuator/rotateTrack/command",
+        {"target_angle": target_angle},
+    )
+
+
+def command_drop_track(target: str, motor_a_speed: int, motor_b_speed: int) -> None:
+    publish_json(
+        "ride/actuator/dropTrack/command",
+        {
+            "target": target,
+            "motor_a_speed": motor_a_speed,
+            "motor_b_speed": motor_b_speed,
+        },
+    )
+
+
+def stop_all_vehicles() -> None:
+    for vehicle_id in vehicles:
+        drive_vehicle(vehicle_id, speed=0.0, left_speed=0, right_speed=0)
+
+
+def send_heartbeat() -> None:
+    publish_json(
+        "ride/controller/heartbeat",
+        {
+            "alive": True,
+            "mode": ride_mode,
+            "estop": estop_active,
+        },
+    )
+
+
+def main() -> None:
     client.on_connect = on_connect
     client.on_message = on_message
 
     client.connect(BROKER, PORT)
-
     client.loop_start()
 
     print("Ride controller running")
 
-    last_heartbeat = time.time()
+    last_heartbeat = 0.0
 
     while True:
-
         now = time.time()
 
-        if now - last_heartbeat > 1:
+        if now - last_heartbeat >= 1.0:
             send_heartbeat()
             last_heartbeat = now
 
         time.sleep(0.05)
 
-
-# -----------------------------
-# START
-# -----------------------------
 
 if __name__ == "__main__":
     main()

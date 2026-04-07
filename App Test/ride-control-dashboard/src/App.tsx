@@ -42,8 +42,7 @@ export default function App() {
     Rotate1: 0, Rotate2: 0, Basket: 0, Mid: 0, Drop1: 0, Drop2: 0
   });
   const [vehicles, setVehicles] = useState<Record<string, any>>({
-    "0": { speed: 0, yaw: 0, pitch: 0 },
-    "1": { speed: 0, yaw: 0, pitch: 0 }
+    "0": { speed: 0, yaw: 90, pitch: 90 }
   });
 
   // Process incoming MQTT messages
