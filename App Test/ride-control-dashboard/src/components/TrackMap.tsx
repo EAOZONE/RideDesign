@@ -13,49 +13,40 @@ interface TrackMapProps {
 }
 
 export const TrackMap: React.FC<TrackMapProps> = ({ sensors, vehicles }) => {
-  // Grid Size: 1000x1000
-  // Environmental Zones adjusted for 823x453
-  const zones = [
-    { id: 'Station', x: 200, y: 420, w: 250, h: 33, color: 'bg-orange-500/20', border: 'border-orange-500/40' },
-    { id: 'Football', x: 20, y: 30, w: 200, h: 380, color: 'bg-green-500/10', border: 'border-green-500/30' },
-    { id: 'Basketball', x: 400, y: 140, w: 150, h: 100, color: 'bg-orange-600/10', border: 'border-orange-600/30' },
-    { id: 'Baseball', x: 680, y: 40, w: 140, h: 120, color: 'bg-red-500/10', border: 'border-red-500/30' },
-  ];
-
-  // Track Path Geometry based on the simplified sequence:
-  // Station -> Loop -> Switch -> Rotator -> Basketball -> Football -> Station
+  // Grid Size: 823x453
+  // Track Path Geometry rebuilt to match the sketch flows
   const trackPath = [
-    "M 240,445", // Station 1
-    "L 380,445", // Station 2
-    "L 550,445", // Straight East
-    "C 750,445 850,400 800,300", // Loop up
-    "C 750,200 650,250 700,445", // Loop back to Centry
-    "L 780,100", // Switch 1
-    "L 720,90",  // Switch 2
-    "L 530,90",  // Rotate 1
-    "L 500,110", // Rotate 2
-    "Q 450,110 450,190", // Basket
-    "L 180,50",  // Mid
-    "L 70,140",  // Drop 1
-    "L 65,370",  // Drop 2
-    "L 65,445",  // 90 degree turn corner
-    "L 240,445", // Back to Station 1
+    "M 260,405",                  // Enter Station
+    "L 420,405",                  // Leave Station
+    "L 620,405",                  // Straight towards Loop
+    "C 750,405 750,280 670,280",  // Loop top half
+    "C 600,280 600,390 690,390",  // Loop bottom half (Centry)
+    "C 750,390 750,200 700,140",  // Up towards Baseball
+    "C 680,100 740,80 760,100",   // Curve right into Baseball
+    "C 780,120 740,140 680,140",  // Hairpin left out of Baseball
+    "L 480,140",                  // Straight left to Basketball
+    "C 420,140 420,240 380,240",  // Curve down into Basketball
+    "L 300,240",                  // Through Basketball
+    "C 200,240 200,50 120,50",    // Left out and up over Football
+    "C 60,50 60,100 60,150",      // Down into Football
+    "L 60,320",                   // Straight down Football
+    "C 60,405 180,405 260,405",   // Curve back to Station
     "Z"
   ].join(" ");
 
-  // Updated sensor positions based on the new dashboard.js
+  // Sensor positions perfectly aligned onto the new SVG path
   const sensorPositions: Record<string, { x: number; y: number }> = {
-    Station1: { x: 240, y: 445 },
-    Station2: { x: 380, y: 445 },
-    Centry: { x: 700, y: 445 },
-    Switch1: { x: 780, y: 100 },
-    Switch2: { x: 720, y: 90 },
-    Rotate1: { x: 530, y: 90 },
-    Rotate2: { x: 500, y: 110 },
-    Basket: { x: 450, y: 190 },
-    Mid: { x: 180, y: 50 },
-    Drop1: { x: 70, y: 140 },
-    Drop2: { x: 65, y: 370 },
+    Station1: { x: 290, y: 405 },
+    Station2: { x: 390, y: 405 },
+    Centry: { x: 690, y: 390 },
+    Switch1: { x: 760, y: 100 },
+    Switch2: { x: 680, y: 140 },
+    Rotate1: { x: 480, y: 140 },
+    Rotate2: { x: 430, y: 190 },
+    Basket: { x: 340, y: 240 },
+    Mid: { x: 120, y: 50 },
+    Drop1: { x: 60, y: 150 },
+    Drop2: { x: 60, y: 300 },
   };
 
   return (
@@ -63,26 +54,6 @@ export const TrackMap: React.FC<TrackMapProps> = ({ sensors, vehicles }) => {
       <div className="absolute top-6 left-6 z-10">
         <h3 className="text-[10px] font-mono text-zinc-500 uppercase tracking-[0.3em]">Track Layout Blueprint</h3>
         <div className="text-[8px] font-mono text-zinc-600 mt-1">GRID: 823x453 | SCALE: 1:1</div>
-      </div>
-
-      {/* Zones Overlay */}
-      <div className="absolute inset-0 pointer-events-none">
-        {zones.map(zone => (
-          <div
-            key={zone.id}
-            className={cn("absolute border border-dashed transition-colors duration-500", zone.color, zone.border)}
-            style={{
-              left: `${(zone.x / 823) * 100}%`,
-              top: `${(zone.y / 453) * 100}%`,
-              width: `${(zone.w / 823) * 100}%`,
-              height: `${(zone.h / 453) * 100}%`,
-            }}
-          >
-            <span className="absolute top-2 left-2 text-[8px] font-mono text-zinc-500 uppercase tracking-widest">
-              {zone.id}
-            </span>
-          </div>
-        ))}
       </div>
       
       <svg viewBox="0 0 823 453" className="w-full h-full relative z-0">
@@ -94,15 +65,15 @@ export const TrackMap: React.FC<TrackMapProps> = ({ sensors, vehicles }) => {
         </defs>
         <rect width="823" height="453" fill="url(#grid)" />
 
-        {/* Track Path (Subtle) */}
+        {/* Track Path (Slightly bumped opacity so you can see it clearer) */}
         <path
           d={trackPath}
           fill="none"
           stroke="#18181b"
-          strokeWidth="20"
+          strokeWidth="15"
           strokeLinecap="round"
           strokeLinejoin="round"
-          className="opacity-20"
+          className="opacity-40"
         />
 
         {/* Sensors */}
@@ -138,7 +109,6 @@ export const TrackMap: React.FC<TrackMapProps> = ({ sensors, vehicles }) => {
 
         {/* Vehicles */}
         {Object.entries(vehicles).map(([id, data]) => {
-          // Find the most recently triggered sensor to position the vehicle
           const activeSensor = Object.keys(sensors).find(s => sensors[s] === 1);
           const pos = activeSensor ? sensorPositions[activeSensor] : sensorPositions.Station1;
 

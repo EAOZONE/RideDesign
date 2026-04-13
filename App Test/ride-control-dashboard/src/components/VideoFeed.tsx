@@ -96,14 +96,6 @@ export const VideoFeed: React.FC = () => {
         />
       </div>
 
-      {/* Bottom Overlay (Telemetry) */}
-      <div className="absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-black/80 to-transparent z-10 flex justify-between items-end pointer-events-none">
-        <div className="space-y-1">
-          <div className="text-[10px] font-mono text-zinc-400">FPS: 24.2</div>
-          <div className="text-[10px] font-mono text-zinc-400">LATENCY: 42ms</div>
-        </div>
-        <div className="text-[10px] font-mono text-zinc-400">CAM_ID: RIDE_V01_FRONT</div>
-      </div>
     </div>
   );
 };
