@@ -4,8 +4,8 @@ from typing import Any
 
 import paho.mqtt.client as mqtt
 
-# BROKER = "localhost"        # Local Development
-BROKER = "10.59.183.183"  # Remote Machine (Ben's IP)
+BROKER = "127.0.0.1"        # Local Development
+# BROKER = "10.59.183.183"  # Remote Machine (Ben's IP)
 PORT = 1883
 
 TRACK_ACTUATOR_DEFAULTS = {
@@ -51,13 +51,9 @@ actuators: dict[str, dict[str, Any]] = {
 switch_waiting_for_alignment = False
 switch_waiting_for_clear = False
 
-try:
-    client = mqtt.Client(
-        callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
-        client_id="ride_controller",
-    )
-except AttributeError:
-    client = mqtt.Client(client_id="ride_controller")
+# For paho-mqtt 2.0 compatibility, we should ideally specify callback_api_version
+# but we'll try to keep it simple for now. 
+client = mqtt.Client()
 
 
 def publish_json(topic: str, payload: dict[str, Any]) -> None:
@@ -65,8 +61,8 @@ def publish_json(topic: str, payload: dict[str, Any]) -> None:
     client.publish(topic, json.dumps(payload))
 
 
-def on_connect(client_obj, userdata, flags, reason_code, properties=None):
-    print("Connected to MQTT with code:", reason_code)
+def on_connect(client_obj, userdata, flags, rc):
+    print("Connected to MQTT with code:", rc)
 
     client_obj.subscribe("ride/sensor/+/state")
     client_obj.subscribe("ride/vehicle/+/+/state")
@@ -304,7 +300,13 @@ def main() -> None:
     client.on_connect = on_connect
     client.on_message = on_message
 
-    client.connect(BROKER, PORT)
+    print(f"Connecting to broker at {BROKER}:{PORT}...")
+    try:
+        client.connect(BROKER, PORT, keepalive=60)
+    except Exception as e:
+        print(f"Failed to connect: {e}")
+        return
+
     client.loop_start()
 
     print("Ride controller running")
