@@ -1,5 +1,5 @@
 // Change based on computer using
-const client = mqtt.connect("ws://10.59.183.183:9001");
+const client = mqtt.connect("ws://localhost:9001");
 
 const vehicle = document.getElementById("vehicle");
 

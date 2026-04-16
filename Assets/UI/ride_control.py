@@ -4,7 +4,7 @@ from typing import Any
 
 import paho.mqtt.client as mqtt
 
-BROKER = "192.168.1.115"  # Change to your Mosquitto broker IP if needed.
+BROKER = "10.59.183.183"  # Change to your Mosquitto broker IP if needed.
 PORT = 1883
 
 TRACK_ACTUATOR_DEFAULTS = {
