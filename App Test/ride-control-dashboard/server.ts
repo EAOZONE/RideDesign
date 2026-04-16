@@ -2,7 +2,7 @@ import express from "express";
 import { createServer as createViteServer } from "vite";
 import path from "path";
 import { spawn } from "child_process";
-import { Aedes } from "aedes";
+import Aedes from "aedes";
 import { createServer as createNetServer } from "net";
 import { createServer as createHttpServer } from "http";
 import ws from "websocket-stream";
@@ -12,7 +12,7 @@ async function startServer() {
   const PORT = 3000;
 
   // 1. Setup MQTT Broker (Aedes)
-  const broker = await Aedes.createBroker();
+  const broker = new Aedes();
   
   // TCP Server for Python/ESP32 (Port 1883)
   const tcpServer = createNetServer(broker.handle);

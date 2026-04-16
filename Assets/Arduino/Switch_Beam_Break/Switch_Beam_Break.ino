@@ -1,130 +1,178 @@
 #include <WiFi.h>
 #include <PubSubClient.h>
 #include <ArduinoJson.h>
+#include <ESP32Servo.h>
 
-const char* ssid = "TPED";
-const char* password = "TPEDwifi";
-
-const char* mqtt_server = "192.168.1.115";
+const char* ssid = "Ben";
+const char* password = "vszu6851";
+const char* mqtt_server = "10.59.183.183";
 
 WiFiClient espClient;
 PubSubClient client(espClient);
 
-const int AIA = 3;
-const int AIB = 4;
-const int BIA = 9;
-const int BIB = 10;
-const int irSwitchPin = 13;
-int lastIrState = HIGH;
+// ✅ KEEPING YOUR PINS
+const int LEFT_MOTOR_FORWARD = D7;
+const int LEFT_MOTOR_REVERSE = D8;
+const int RIGHT_MOTOR_FORWARD = D9;
+const int RIGHT_MOTOR_REVERSE = D10;
 
-int speed = 0;
+const int YAW_SERVO_PIN = D2;
+const int PITCH_SERVO_PIN = D3;
 
-String vehicle_id = "1";
-String topic = "ride/vehicle/1/drive/command";
+Servo yawServo;
+Servo pitchServo;
+
+// ✅ PWM setup for ESP32 (replaces analogWrite safely)
+const int PWM_FREQ = 1000;
+const int PWM_RESOLUTION = 8;
+
+const int CH_LEFT_FWD = 0;
+const int CH_LEFT_REV = 1;
+const int CH_RIGHT_FWD = 2;
+const int CH_RIGHT_REV = 3;
+
+unsigned long lastPingTime = 0;
+const unsigned long PING_INTERVAL = 2000;
 
 void setup_wifi() {
-  delay(10);
+  Serial.println();
+  Serial.print("SSID: ");
+  Serial.println(ssid);
+
+  WiFi.mode(WIFI_STA);
   WiFi.begin(ssid, password);
 
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
+    Serial.print(".");
+  }
+
+  Serial.println("\nWiFi connected");
+  Serial.print("IP: ");
+  Serial.println(WiFi.localIP());
+}
+
+// ✅ Proper ESP32 PWM motor control
+void setMotorChannel(int chFwd, int chRev, int speedValue) {
+  int clamped = constrain(speedValue, -255, 255);
+
+  if (clamped > 0) {
+    ledcWrite(chFwd, clamped);
+    ledcWrite(chRev, 0);
+  } else if (clamped < 0) {
+    ledcWrite(chFwd, 0);
+    ledcWrite(chRev, -clamped);
+  } else {
+    ledcWrite(chFwd, 0);
+    ledcWrite(chRev, 0);
   }
 }
 
 void callback(char* topic, byte* payload, unsigned int length) {
+  Serial.print("Message on topic: ");
+  Serial.println(topic);
 
-  StaticJsonDocument<200> doc;
+  StaticJsonDocument<256> doc;
+  DeserializationError error = deserializeJson(doc, payload, length);
 
-  deserializeJson(doc, payload, length);
-
-  speed = doc["speed"];
-
-  Serial.print("Received speed: ");
-  Serial.println(speed);
-
-  if (speed >= 0){
-    forward();
+  if (error) {
+    Serial.print("JSON Parse Error: ");
+    Serial.println(error.c_str());
+    return;
   }
-  else
-  {
-    backward();
+
+  String topicStr = String(topic);
+
+  if (topicStr == "ride/vehicle/0/drive/command") {
+    int leftSpeed = 0;
+    int rightSpeed = 0;
+
+    if (doc.containsKey("left_speed") && doc.containsKey("right_speed")) {
+      leftSpeed = doc["left_speed"] | 0;
+      rightSpeed = doc["right_speed"] | 0;
+    } else if (doc.containsKey("speed")) {
+      leftSpeed = rightSpeed = doc["speed"] | 0;
+    } else if (doc.containsKey("pwm")) {
+      leftSpeed = rightSpeed = doc["pwm"] | 0;
+    }
+
+    Serial.printf("Drive L=%d R=%d\n", leftSpeed, rightSpeed);
+
+    setMotorChannel(CH_LEFT_FWD, CH_LEFT_REV, leftSpeed);
+    setMotorChannel(CH_RIGHT_FWD, CH_RIGHT_REV, rightSpeed);
+  } 
+  else if (topicStr == "ride/vehicle/0/servoYaw/command") {
+    int angle = constrain(doc["angle"] | 90, 0, 180);
+    Serial.printf("Yaw -> %d\n", angle);
+    yawServo.write(angle);
+  } 
+  else if (topicStr == "ride/vehicle/0/servoPitch/command") {
+    int angle = constrain(doc["angle"] | 90, 0, 180);
+    Serial.printf("Pitch -> %d\n", angle);
+    pitchServo.write(angle);
   }
 }
 
 void reconnect() {
-
   while (!client.connected()) {
-
-    if (client.connect("vehicle_client")) {
+    Serial.print("Attempting MQTT connection...");
+    if (client.connect("RideVehicleESP")) {
+      Serial.println("connected");
 
       client.subscribe("ride/vehicle/0/drive/command");
-
+      client.subscribe("ride/vehicle/0/servoYaw/command");
+      client.subscribe("ride/vehicle/0/servoPitch/command");
     } else {
-
-      delay(2000);
+      Serial.print("failed, rc=");
+      Serial.println(client.state());
+      delay(5000);
     }
   }
 }
 
 void setup() {
-
   Serial.begin(115200);
 
-  pinMode(AIA, OUTPUT);
-  pinMode(AIB, OUTPUT);
-  pinMode(BIA, OUTPUT);
-  pinMode(BIB, OUTPUT);
-  pinMode(irSwitchPin, INPUT);
-
   setup_wifi();
-
   client.setServer(mqtt_server, 1883);
   client.setCallback(callback);
+
+  // ✅ Setup PWM channels
+  ledcAttach(LEFT_MOTOR_FORWARD, PWM_FREQ, CH_LEFT_FWD);
+  ledcAttach(LEFT_MOTOR_REVERSE, PWM_FREQ, CH_LEFT_REV);
+  ledcAttach(RIGHT_MOTOR_FORWARD, PWM_FREQ, CH_RIGHT_FWD);
+  ledcAttach(RIGHT_MOTOR_REVERSE, PWM_FREQ, CH_RIGHT_REV);
+
+  // Stop motors
+  setMotorChannel(CH_LEFT_FWD, CH_LEFT_REV, 0);
+  setMotorChannel(CH_RIGHT_FWD, CH_RIGHT_REV, 0);
+
+  // ✅ CRITICAL FIX: Proper servo setup (from your reference code)
+  ESP32PWM::allocateTimer(0);
+  ESP32PWM::allocateTimer(1);
+
+  yawServo.setPeriodHertz(50);
+  pitchServo.setPeriodHertz(50);
+
+  yawServo.attach(YAW_SERVO_PIN, 500, 2400);
+  pitchServo.attach(PITCH_SERVO_PIN, 500, 2400);
+
+  yawServo.write(90);
+  pitchServo.write(90);
+
+  Serial.println("Setup complete");
 }
 
 void loop() {
-
   if (!client.connected()) {
     reconnect();
   }
 
   client.loop();
 
-  int irState = digitalRead(irSwitchPin);
-  Serial.println(irState);
-  if (irState == LOW && lastIrState == HIGH) {
-    publishSwitchTrack();
+  unsigned long now = millis();
+  if (now - lastPingTime > PING_INTERVAL) {
+    lastPingTime = now;
+    client.publish("ride/vehicle/0/ping", "{\"status\":\"ok\"}");
   }
-
-  lastIrState = irState;
-}
-void publishSwitchTrack() {
-
-  const char* topic = "ride/sensor/Switch1/state";
-
-  StaticJsonDocument<100> doc;
-  doc["Sensor"] = "Switch1";
-  doc["state"] = 1;
-
-  char buffer[128];
-  serializeJson(doc, buffer);
-
-  client.publish(topic, buffer);
-
-  Serial.println("Published switchTrack trigger");
-}
-void forward()
-{
-  analogWrite(AIA, speed);
-  analogWrite(AIB, 0);
-  analogWrite(BIA, speed);
-  analogWrite(BIB, 0);
-}
-
-void backward()
-{
-  analogWrite(AIA, 0);
-  analogWrite(AIB, -speed);
-  analogWrite(BIA, 0);
-  analogWrite(BIB, -speed);
 }

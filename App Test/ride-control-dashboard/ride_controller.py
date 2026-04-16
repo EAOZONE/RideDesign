@@ -4,8 +4,8 @@ from typing import Any
 
 import paho.mqtt.client as mqtt
 
-BROKER = "localhost"        # Local Development
-# BROKER = "192.168.1.115"  # Remote Machine (Ben's IP)
+# BROKER = "localhost"        # Local Development
+BROKER = "10.59.183.183"  # Remote Machine (Ben's IP)
 PORT = 1883
 
 TRACK_ACTUATOR_DEFAULTS = {
@@ -51,7 +51,13 @@ actuators: dict[str, dict[str, Any]] = {
 switch_waiting_for_alignment = False
 switch_waiting_for_clear = False
 
-client = mqtt.Client(client_id="ride_controller")
+try:
+    client = mqtt.Client(
+        callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
+        client_id="ride_controller",
+    )
+except AttributeError:
+    client = mqtt.Client(client_id="ride_controller")
 
 
 def publish_json(topic: str, payload: dict[str, Any]) -> None:
@@ -59,8 +65,8 @@ def publish_json(topic: str, payload: dict[str, Any]) -> None:
     client.publish(topic, json.dumps(payload))
 
 
-def on_connect(client_obj, userdata, flags, rc):
-    print("Connected to MQTT with code:", rc)
+def on_connect(client_obj, userdata, flags, reason_code, properties=None):
+    print("Connected to MQTT with code:", reason_code)
 
     client_obj.subscribe("ride/sensor/+/state")
     client_obj.subscribe("ride/vehicle/+/+/state")

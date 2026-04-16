@@ -83,7 +83,7 @@ void publishDriveState() {
   StaticJsonDocument<192> doc;
   doc["left_speed"] = currentLeftSpeed;
   doc["right_speed"] = currentRightSpeed;
-  doc["speed"] = (currentLeftSpeed + currentRightSpeed) / 510.0;
+  doc["speed"] = (currentLeftSpeed + currentRightSpeed) / 2;
   doc["moving"] = (currentLeftSpeed != 0 || currentRightSpeed != 0);
   publishJson(makeTopic("drive", "state"), doc);
 }
@@ -108,8 +108,7 @@ void handleDriveCommand(JsonDocument& doc) {
   int rightSpeed = doc["right_speed"] | 0;
 
   if (!doc["left_speed"].is<int>() || !doc["right_speed"].is<int>()) {
-    float speed = doc["speed"] | 0.0;
-    int pwm = constrain((int)(speed * 255.0), -255, 255);
+    int pwm = constrain((int)(doc["speed"] | 0), -255, 255);
     leftSpeed = pwm;
     rightSpeed = pwm;
   }
