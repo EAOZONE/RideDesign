@@ -4,7 +4,7 @@
   "version": "0.0.0",
   "type": "module",
   "engines": {
-    "node": ">=18 <19"
+    "node": ">=18"
   },
   "scripts": {
     "dev": "node server.js",
@@ -15,14 +15,7 @@
     "lint": "tsc --noEmit"
   },
   "dependencies": {
-<<<<<<< HEAD
-    "@tailwindcss/vite": "^4.1.14",
-    "@vitejs/plugin-react": "^4.4.1",
-    "aedes": "^0.51.3",
-    "clsx": "^2.1.1",
-=======
     "aedes": "^1.0.2",
->>>>>>> 10922c6 (downgraded node)
     "dotenv": "^17.2.3",
     "express": "^4.21.2",
     "websocket-stream": "^5.5.2"
