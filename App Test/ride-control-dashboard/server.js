@@ -1,5 +1,4 @@
 import express from "express";
-import { createServer as createViteServer } from "vite";
 import path from "path";
 import { spawn } from "child_process";
 import Aedes from "aedes";
@@ -25,7 +24,7 @@ async function startServer() {
 
   // Attach Aedes to WebSockets on the same HTTP server
   // We'll use a specific path for MQTT over WS
-  ws.createServer({ server: httpServer, path: "/mqtt" }, broker.handle as any);
+  ws.createServer({ server: httpServer, path: "/mqtt" }, broker.handle);
 
   // 2. Spawn Ride Controller (Python)
   // Try 'python3' first, then 'python'
@@ -60,6 +59,7 @@ async function startServer() {
 
   // 4. Vite Middleware for Development
   if (process.env.NODE_ENV !== "production") {
+    const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",

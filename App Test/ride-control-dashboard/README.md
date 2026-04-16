@@ -39,7 +39,26 @@ The application is designed to run both the web server and the ride controller s
     Open your browser and navigate to:
     `http://localhost:3000`
 
-## 4. Connecting Hardware (ESP32 / Arduino)
+## 4. Raspberry Pi Zero W (Production Mode)
+
+The Pi Zero W has limited resources and may struggle with the full development environment. For the best experience:
+
+1.  **Build the project** on a more powerful machine (Mac/PC):
+    ```bash
+    npm install
+    npm run build
+    ```
+2.  **Transfer the project** (including the `dist` folder and `server.js`) to the Pi.
+3.  **Install only production dependencies** on the Pi:
+    ```bash
+    npm install --omit=dev
+    ```
+4.  **Start the production server**:
+    ```bash
+    npm start
+    ```
+
+## 5. Connecting Hardware (ESP32 / Arduino)
 
 Your hardware boards should connect to the IP address of your Mac/Raspberry Pi on **Port 1883**.
 
