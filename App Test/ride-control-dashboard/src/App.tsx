@@ -34,6 +34,28 @@ function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
+type AutoAngleWaypoint = {
+  sensorId: string;
+  yaw: number;
+  pitch: number;
+};
+
+const VEHICLE_ID = '0';
+
+const AUTO_ANGLE_PROFILE: AutoAngleWaypoint[] = [
+  { sensorId: 'Station1', yaw: 90, pitch: 90 },
+  { sensorId: 'Station2', yaw: 90, pitch: 90 },
+  { sensorId: 'Centry', yaw: 90, pitch: 90 },
+  { sensorId: 'Switch1', yaw: 120, pitch: 90 },
+  { sensorId: 'Switch2', yaw: 60, pitch: 90 },
+  { sensorId: 'Rotate1', yaw: 90, pitch: 90 },
+  { sensorId: 'Rotate2', yaw: 90, pitch: 90 },
+  { sensorId: 'Basket', yaw: 90, pitch: 115 },
+  { sensorId: 'Mid', yaw: 90, pitch: 90 },
+  { sensorId: 'Drop1', yaw: 90, pitch: 65 },
+  { sensorId: 'Drop2', yaw: 90, pitch: 90 },
+];
+
 export default function App() {
   const { messages, status, publish } = useMqtt();
   const [rideMode, setRideMode] = useState<'manual' | 'auto'>('auto');
@@ -43,7 +65,7 @@ export default function App() {
     Rotate1: 0, Rotate2: 0, Basket: 0, Mid: 0, Drop1: 0, Drop2: 0
   });
   const [vehicle, setVehicle] = useState<any>({
-    id: 'V-001',
+    id: VEHICLE_ID,
     speed: 0,
     yaw: 90,
     pitch: 90,
@@ -55,6 +77,14 @@ export default function App() {
     rotateTrack: { angle: 0, moving: false },
     dropTrack: { target: 'top', moving: false },
   });
+  const [currentAutoAngleSensor, setCurrentAutoAngleSensor] = useState<string | null>(null);
+  const [lastAutoAngleSensor, setLastAutoAngleSensor] = useState<string | null>(null);
+  const autoAnglesBySensor = useMemo(() => {
+    return AUTO_ANGLE_PROFILE.reduce<Record<string, AutoAngleWaypoint>>((lookup, waypoint) => {
+      lookup[waypoint.sensorId] = waypoint;
+      return lookup;
+    }, {});
+  }, []);
 
   // Process incoming MQTT messages
   useEffect(() => {
@@ -64,6 +94,12 @@ export default function App() {
     if (topic.startsWith('ride/sensor/')) {
       const sensorId = topic.split('/')[2];
       setSensors(prev => ({ ...prev, [sensorId]: payload.state }));
+      if (payload.state === 1) {
+        setCurrentAutoAngleSensor(sensorId);
+      } else {
+        setCurrentAutoAngleSensor(prev => prev === sensorId ? null : prev);
+        setLastAutoAngleSensor(prev => prev === sensorId ? null : prev);
+      }
     } else if (topic.startsWith('ride/vehicle/')) {
       const parts = topic.split('/');
       const vehicleId = parts[2];
@@ -102,6 +138,18 @@ export default function App() {
 
     return () => clearInterval(interval);
   }, [vehicle.connected, vehicle.lastHeartbeat]);
+
+  useEffect(() => {
+    if (rideMode !== 'auto' || isEstopActive) return;
+    if (!currentAutoAngleSensor || currentAutoAngleSensor === lastAutoAngleSensor) return;
+
+    const waypoint = autoAnglesBySensor[currentAutoAngleSensor];
+    if (!waypoint) return;
+
+    publish(`ride/vehicle/${vehicle.id}/servoYaw/command`, { angle: waypoint.yaw });
+    publish(`ride/vehicle/${vehicle.id}/servoPitch/command`, { angle: waypoint.pitch });
+    setLastAutoAngleSensor(currentAutoAngleSensor);
+  }, [autoAnglesBySensor, currentAutoAngleSensor, isEstopActive, lastAutoAngleSensor, publish, rideMode, vehicle.id]);
 
   const handleEstop = () => {
     const newState = !isEstopActive;

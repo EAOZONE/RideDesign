@@ -3,9 +3,9 @@
 #include <ArduinoJson.h>
 #include <ESP32Servo.h>
 
-const char* ssid = "Ben";
-const char* password = "vszu6851";
-const char* mqtt_server = "10.59.183.183";
+const char* ssid = "TPED";
+const char* password = "TPEDwifi";
+const char* mqtt_server = "192.168.1.116";
 
 WiFiClient espClient;
 PubSubClient client(espClient);

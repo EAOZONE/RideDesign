@@ -1,6 +1,7 @@
 import json
+import threading
 import time
-from typing import Any
+from typing import Any, Callable
 
 import paho.mqtt.client as mqtt
 
@@ -29,6 +30,25 @@ SENSOR_IDS = [
 
 VEHICLE_IDS = ["0"]
 
+SAVED_RIDE_ANGLE_PROFILES: dict[str, list[dict[str, int | str]]] = {
+    "default": [
+        {"sensor_id": "Station1", "yaw": 90, "pitch": 90},
+        {"sensor_id": "Switch1", "yaw": 120, "pitch": 90},
+        {"sensor_id": "Switch2", "yaw": 60, "pitch": 90},
+        {"sensor_id": "Rotate1", "yaw": 90, "pitch": 90},
+        {"sensor_id": "Drop1", "yaw": 90, "pitch": 65},
+        {"sensor_id": "Station2", "yaw": 90, "pitch": 90},
+    ],
+}
+
+ACTIVE_RIDE_PROFILE = "default"
+
+STATION_TO_SWITCH_TIMED_SEQUENCE = [
+    {"delay": 0.0, "speed": 0.35, "yaw": 90, "pitch": 100},
+    {"delay": 1.0, "yaw": 120, "pitch": 80},
+    {"delay": 2.5, "yaw": 60, "pitch": 110},
+]
+
 ride_mode = "manual"
 estop_active = False
 
@@ -50,6 +70,8 @@ actuators: dict[str, dict[str, Any]] = {
 
 switch_waiting_for_alignment = False
 switch_waiting_for_clear = False
+scheduled_actions: list[tuple[float, Callable[[], None]]] = []
+scheduled_actions_lock = threading.Lock()
 
 # For paho-mqtt 2.0 compatibility, we should ideally specify callback_api_version
 # but we'll try to keep it simple for now. 
@@ -102,7 +124,7 @@ def handle_sensor(topic: str, data: dict[str, Any]) -> None:
     sensors[sensor_id] = state
     print("Sensor", sensor_id, "=", state)
 
-    if not estop_active:
+    if not estop_active and ride_mode == "auto":
         process_sensor(sensor_id, state)
 
 
@@ -114,9 +136,10 @@ def process_sensor(sensor_id: str, state: int) -> None:
         return
 
     print("Triggered sensor:", sensor_id)
+    apply_saved_ride_angles("0", sensor_id)
 
     if sensor_id == "Station1":
-        drive_vehicle("0", speed=0.35)
+        schedule_station_to_switch_sequence("0")
 
     elif sensor_id == "Switch1":
         drive_vehicle("0", speed=0.0)
@@ -137,8 +160,80 @@ def process_sensor(sensor_id: str, state: int) -> None:
 
     elif sensor_id == "Station2":
         drive_vehicle("0", speed=0.0)
-        set_yaw("0", 90)
-        set_pitch("0", 90)
+
+
+def apply_saved_ride_angles(vehicle_id: str, sensor_id: str) -> None:
+    for waypoint in SAVED_RIDE_ANGLE_PROFILES.get(ACTIVE_RIDE_PROFILE, []):
+        if waypoint.get("sensor_id") != sensor_id:
+            continue
+
+        yaw = int(waypoint["yaw"])
+        pitch = int(waypoint["pitch"])
+        set_yaw(vehicle_id, yaw)
+        set_pitch(vehicle_id, pitch)
+        print(
+            "Applied saved ride angles:",
+            ACTIVE_RIDE_PROFILE,
+            sensor_id,
+            f"yaw={yaw}",
+            f"pitch={pitch}",
+        )
+        return
+
+
+def schedule_action(delay_seconds: float, action: Callable[[], None]) -> None:
+    run_at = time.time() + delay_seconds
+    with scheduled_actions_lock:
+        scheduled_actions.append((run_at, action))
+
+
+def clear_scheduled_actions() -> None:
+    with scheduled_actions_lock:
+        scheduled_actions.clear()
+
+
+def process_scheduled_actions() -> None:
+    now = time.time()
+
+    with scheduled_actions_lock:
+        due_actions = [
+            scheduled_action
+            for scheduled_action in scheduled_actions
+            if scheduled_action[0] <= now
+        ]
+        pending_actions = [
+            scheduled_action
+            for scheduled_action in scheduled_actions
+            if scheduled_action[0] > now
+        ]
+        scheduled_actions[:] = pending_actions
+
+    for _, action in sorted(due_actions, key=lambda scheduled_action: scheduled_action[0]):
+        if estop_active or ride_mode != "auto":
+            continue
+
+        action()
+
+
+def schedule_station_to_switch_sequence(vehicle_id: str) -> None:
+    clear_scheduled_actions()
+
+    for step in STATION_TO_SWITCH_TIMED_SEQUENCE:
+        delay = float(step["delay"])
+
+        def run_step(sequence_step=step) -> None:
+            if "speed" in sequence_step:
+                drive_vehicle(vehicle_id, speed=float(sequence_step["speed"]))
+
+            if "yaw" in sequence_step:
+                set_yaw(vehicle_id, int(sequence_step["yaw"]))
+
+            if "pitch" in sequence_step:
+                set_pitch(vehicle_id, int(sequence_step["pitch"]))
+
+        schedule_action(delay, run_step)
+
+    print("Scheduled station-to-switch timed sequence")
 
 
 def handle_vehicle_state(topic: str, data: dict[str, Any]) -> None:
@@ -198,6 +293,7 @@ def handle_estop(data: dict[str, Any]) -> None:
 
     if estop_active:
         print("!!! EMERGENCY STOP !!!")
+        clear_scheduled_actions()
         stop_all_vehicles()
         command_drop_track("hold", motor_a_speed=0, motor_b_speed=0)
 
@@ -208,12 +304,16 @@ def handle_mode(data: dict[str, Any]) -> None:
     ride_mode = data.get("mode", "manual")
     print("Ride mode:", ride_mode)
 
+    if ride_mode != "auto":
+        clear_scheduled_actions()
+
 
 def handle_reset() -> None:
     global switch_waiting_for_alignment
     global switch_waiting_for_clear
 
     print("System reset")
+    clear_scheduled_actions()
     stop_all_vehicles()
     command_switch_track(0)
     command_turntable(0)
@@ -320,6 +420,7 @@ def main() -> None:
             send_heartbeat()
             last_heartbeat = now
 
+        process_scheduled_actions()
         time.sleep(0.05)
 
 
