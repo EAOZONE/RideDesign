@@ -1,395 +1,427 @@
-#include <WiFi.h>
+/*
+=========================================================
+UNO R4 WIFI + PCA9685 + MQTT
+UPDATED SYSTEM
+
+CHANGE:
+Turntable is now a SERVO (0° to 180°)
+instead of motor timer rotation.
+
+PCA CHANNELS:
+CH0 = Switch Track Servo
+CH8 = Turntable Servo
+
+MQTT:
+ride/actuator/rotateTrack/command
+{"target_angle":0}
+{"target_angle":180}
+
+=========================================================
+*/
+
+#include <WiFiS3.h>
 #include <PubSubClient.h>
 #include <ArduinoJson.h>
-#include <Servo.h>
+#include <Wire.h>
+#include <Adafruit_PWMServoDriver.h>
 
-// Update these credentials for your network.
-const char* WIFI_SSID = "TPED";
+const char* WIFI_SSID     = "TPED";
 const char* WIFI_PASSWORD = "TPEDwifi";
-const char* MQTT_BROKER = "192.168.1.116";  // Change if your broker IP is different.
+
+const char* MQTT_BROKER = "192.168.1.116";
 const int MQTT_PORT = 1883;
 
 WiFiClient wifiClient;
 PubSubClient mqttClient(wifiClient);
 
-// Update these pins to match your board and driver wiring.
-const int SWITCH_SERVO_PIN = 3;
-const int ROTATE_MOTOR_FORWARD_PIN = 5;   // PWM-capable on Uno R4 WiFi
-const int ROTATE_MOTOR_REVERSE_PIN = 6;   // PWM-capable on Uno R4 WiFi
-const int DROP_MOTOR_A_FORWARD_PIN = 9;   // PWM-capable on Uno R4 WiFi
-const int DROP_MOTOR_A_REVERSE_PIN = 10;  // PWM-capable on Uno R4 WiFi
-const int DROP_MOTOR_B_FORWARD_PIN = 11;  // PWM-capable on Uno R4 WiFi
-const int DROP_MOTOR_B_REVERSE_PIN = A0;  // Digital direction pin (not PWM)
+Adafruit_PWMServoDriver pwm = Adafruit_PWMServoDriver(0x40);
 
-const bool ROTATE_MOTOR_FORWARD_PWM = true;
-const bool ROTATE_MOTOR_REVERSE_PWM = true;
-const bool DROP_MOTOR_A_FORWARD_PWM = true;
-const bool DROP_MOTOR_A_REVERSE_PWM = true;
-const bool DROP_MOTOR_B_FORWARD_PWM = true;
-const bool DROP_MOTOR_B_REVERSE_PWM = false;
+// =====================================================
+// CHANNELS
+// =====================================================
 
-const int PWM_MAX_DUTY = 255;
+const int SWITCH_SERVO = 0;
+const int TURN_SERVO   = 8;
 
-// Change these six pins and names to match your actual IR sensor layout.
-const int SENSOR_COUNT = 6;
-const int IR_SENSOR_PINS[SENSOR_COUNT] = {2, 4, 7, 8, 12, 13};
-const char* IR_SENSOR_NAMES[SENSOR_COUNT] = {
-  "Station1",
-  "Switch1",
-  "Switch2",
-  "Rotate1",
-  "Drop1",
-  "Station2"
-};
+// Drop motors
+const int DL_FWD = 3;
+const int DL_REV = 4;
+const int DR_FWD = 1;
+const int DR_REV = 2;
 
-int lastSensorStates[SENSOR_COUNT];
-Servo switchServo;
+// =====================================================
+// SERVO SETTINGS
+// =====================================================
 
-int switchCurrentAngle = 0;
-int switchTargetAngle = 0;
+const int SERVO_MIN = 120;
+const int SERVO_MAX = 620;
 
-String rotateTarget = "stop";
-bool rotateMoving = false;
-unsigned long rotateMoveStartedAt = 0;
-unsigned long rotateMoveDurationMs = 0;
-const unsigned long ROTATE_FULL_SWEEP_TIME_MS = 3000;
-int lastRotateMotorSpeed = 0;
-int rotateCurrentAngle = 0;
-int rotateTargetAngle = 0;
+// switch track
+int switchCurrent = 0;
+int switchTarget  = 0;
 
-String dropTarget = "hold";
-bool dropMoving = false;
-unsigned long dropMoveStartedAt = 0;
-const unsigned long DROP_MOVE_TIME_MS = 2200;
-int lastDropMotorSpeed = 0;
+// turntable
+int turnCurrent = 0;
+int turnTarget  = 0;
 
+// =====================================================
+// DROP ENCODER
+// =====================================================
 
-void connectWifi() {
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+const int ENC_A = 2;
+const int ENC_B = 3;
 
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-  }
+volatile long dropCount = 0;
+volatile int lastEncoded = 0;
+
+// =====================================================
+// SENSOR PINS
+// =====================================================
+
+const int SENSOR_STATION      = 4;
+const int SENSOR_SWITCH1      = 5;
+const int SENSOR_SWITCH2      = 6;
+const int SENSOR_ROTATE1      = 7;
+const int SENSOR_DROP2_TOP    = 10;
+const int SENSOR_DROP1_BOTTOM = 11;
+
+bool lastStation = HIGH;
+bool lastSwitch1 = HIGH;
+bool lastSwitch2 = HIGH;
+bool lastRotate1 = HIGH;
+bool lastDropTop = HIGH;
+bool lastDropBot = HIGH;
+
+// =====================================================
+// DROP SETTINGS
+// =====================================================
+
+const long DROP_TOP    = 13400;
+const long DROP_BOTTOM = 7400;
+const int DROP_SPEED   = 4095;
+const int DROP_TOL     = 10;
+
+// =====================================================
+// HELPERS
+// =====================================================
+
+void setPWM(int ch, int val)
+{
+  val = constrain(val, 0, 4095);
+  pwm.setPWM(ch, 0, val);
 }
 
-
-void publishJson(const char* topic, JsonDocument& doc) {
-  char payload[256];
-  serializeJson(doc, payload);
-  mqttClient.publish(topic, payload);
+int angleToPulse(int angle)
+{
+  angle = constrain(angle, 0, 180);
+  return map(angle, 0, 180, SERVO_MIN, SERVO_MAX);
 }
 
-
-void publishSensorState(const char* sensorName, int state) {
-  StaticJsonDocument<128> doc;
-  doc["sensor_id"] = sensorName;
-  doc["state"] = state;
-  publishJson((String("ride/sensor/") + sensorName + "/state").c_str(), doc);
+void setServoChannel(int ch, int angle)
+{
+  pwm.setPWM(ch, 0, angleToPulse(angle));
 }
 
+// =====================================================
+// STOP
+// =====================================================
 
-void publishSwitchState() {
-  StaticJsonDocument<128> doc;
-  doc["angle"] = switchCurrentAngle;
-  doc["target_angle"] = switchTargetAngle;
-  doc["moving"] = (switchCurrentAngle != switchTargetAngle);
-  publishJson("ride/actuator/switchTrack/state", doc);
+void stopDrop()
+{
+  setPWM(DL_FWD, 0);
+  setPWM(DL_REV, 0);
+  setPWM(DR_FWD, 0);
+  setPWM(DR_REV, 0);
 }
 
+// =====================================================
+// DROP MOTOR
+// =====================================================
 
-void publishRotateState() {
-  StaticJsonDocument<128> doc;
-  doc["target"] = rotateTarget;
-  doc["angle"] = rotateCurrentAngle;
-  doc["target_angle"] = rotateTargetAngle;
-  doc["moving"] = rotateMoving;
-  doc["motor_speed"] = lastRotateMotorSpeed;
-  publishJson("ride/actuator/rotateTrack/state", doc);
+void moveDropUp()
+{
+  setPWM(DL_FWD, 0);
+  setPWM(DL_REV, DROP_SPEED);
+
+  setPWM(DR_FWD, DROP_SPEED);
+  setPWM(DR_REV, 0);
 }
 
+void moveDropDown()
+{
+  setPWM(DL_FWD, DROP_SPEED);
+  setPWM(DL_REV, 0);
 
-void publishDropState() {
-  StaticJsonDocument<128> doc;
-  doc["target"] = dropTarget;
-  doc["moving"] = dropMoving;
-  doc["motor_speed"] = lastDropMotorSpeed;
-  publishJson("ride/actuator/dropTrack/state", doc);
+  setPWM(DR_FWD, 0);
+  setPWM(DR_REV, DROP_SPEED);
 }
 
+// =====================================================
+// DROP ENCODER
+// =====================================================
 
-void writeMotorPin(int pin, bool pwmCapable, int value) {
-  int clampedValue = constrain(value, 0, PWM_MAX_DUTY);
-  if (pwmCapable) {
-    analogWrite(pin, clampedValue);
-  } else {
-    digitalWrite(pin, clampedValue > 0 ? HIGH : LOW);
-  }
+void isrDrop()
+{
+  int MSB = digitalRead(ENC_A);
+  int LSB = digitalRead(ENC_B);
+
+  int encoded = (MSB << 1) | LSB;
+  int sum = (lastEncoded << 2) | encoded;
+
+  if (sum == 0b1101 || sum == 0b0100 ||
+      sum == 0b0010 || sum == 0b1011)
+    dropCount++;
+
+  if (sum == 0b1110 || sum == 0b0111 ||
+      sum == 0b0001 || sum == 0b1000)
+    dropCount--;
+
+  lastEncoded = encoded;
 }
 
-
-void setMotorOutput(int forwardPin, bool forwardPwmCapable, int reversePin, bool reversePwmCapable, int speedValue) {
-  int clamped = constrain(speedValue, -PWM_MAX_DUTY, PWM_MAX_DUTY);
-
-  if (clamped > 0) {
-    writeMotorPin(forwardPin, forwardPwmCapable, clamped);
-    writeMotorPin(reversePin, reversePwmCapable, 0);
-  } else if (clamped < 0) {
-    writeMotorPin(forwardPin, forwardPwmCapable, 0);
-    writeMotorPin(reversePin, reversePwmCapable, -clamped);
-  } else {
-    writeMotorPin(forwardPin, forwardPwmCapable, 0);
-    writeMotorPin(reversePin, reversePwmCapable, 0);
-  }
+long getDropCount()
+{
+  noInterrupts();
+  long v = dropCount;
+  interrupts();
+  return v;
 }
 
+// =====================================================
+// DROP POSITION
+// =====================================================
 
-void stopRotateMotor() {
-  lastRotateMotorSpeed = 0;
-  setMotorOutput(ROTATE_MOTOR_FORWARD_PIN, ROTATE_MOTOR_FORWARD_PWM, ROTATE_MOTOR_REVERSE_PIN, ROTATE_MOTOR_REVERSE_PWM, 0);
-}
+void goDropTo(long target)
+{
+  while (1)
+  {
+    mqttClient.loop();
 
+    long pos = getDropCount();
+    long error = target - pos;
 
-void runRotateMotor(int speedValue) {
-  lastRotateMotorSpeed = constrain(speedValue, -PWM_MAX_DUTY, PWM_MAX_DUTY);
-  setMotorOutput(ROTATE_MOTOR_FORWARD_PIN, ROTATE_MOTOR_FORWARD_PWM, ROTATE_MOTOR_REVERSE_PIN, ROTATE_MOTOR_REVERSE_PWM, lastRotateMotorSpeed);
-}
-
-
-void stopDropMotors() {
-  lastDropMotorSpeed = 0;
-  setMotorOutput(DROP_MOTOR_A_FORWARD_PIN, DROP_MOTOR_A_FORWARD_PWM, DROP_MOTOR_A_REVERSE_PIN, DROP_MOTOR_A_REVERSE_PWM, 0);
-  setMotorOutput(DROP_MOTOR_B_FORWARD_PIN, DROP_MOTOR_B_FORWARD_PWM, DROP_MOTOR_B_REVERSE_PIN, DROP_MOTOR_B_REVERSE_PWM, 0);
-}
-
-
-void runDropMotors(int speedValue) {
-  lastDropMotorSpeed = constrain(speedValue, -PWM_MAX_DUTY, PWM_MAX_DUTY);
-  setMotorOutput(DROP_MOTOR_A_FORWARD_PIN, DROP_MOTOR_A_FORWARD_PWM, DROP_MOTOR_A_REVERSE_PIN, DROP_MOTOR_A_REVERSE_PWM, lastDropMotorSpeed);
-  setMotorOutput(DROP_MOTOR_B_FORWARD_PIN, DROP_MOTOR_B_FORWARD_PWM, DROP_MOTOR_B_REVERSE_PIN, DROP_MOTOR_B_REVERSE_PWM, lastDropMotorSpeed);
-}
-
-
-void handleSwitchCommand(JsonDocument& doc) {
-  switchTargetAngle = constrain(doc["target_angle"] | 0, 0, 180);
-  publishSwitchState();
-}
-
-
-void handleRotateCommand(JsonDocument& doc) {
-  int speedValue = doc["motor_speed"] | doc["speed"] | 180;
-  rotateTarget = String((const char*)(doc["target"] | ""));
-
-  if (doc.containsKey("target_angle")) {
-    rotateTargetAngle = constrain(doc["target_angle"] | rotateCurrentAngle, 0, 180);
-    int delta = rotateTargetAngle - rotateCurrentAngle;
-
-    if (delta == 0) {
-      rotateTarget = "stop";
-      rotateMoving = false;
-      rotateMoveDurationMs = 0;
-      stopRotateMotor();
-    } else {
-      rotateTarget = (delta > 0) ? "cw" : "ccw";
-      rotateMoving = true;
-      rotateMoveStartedAt = millis();
-      rotateMoveDurationMs = (unsigned long)((abs(delta) * ROTATE_FULL_SWEEP_TIME_MS) / 180);
-      runRotateMotor((delta > 0) ? abs(speedValue) : -abs(speedValue));
+    if (abs(error) <= DROP_TOL)
+    {
+      stopDrop();
+      return;
     }
 
-    publishRotateState();
-    return;
-  }
+    if (error > 0)
+      moveDropUp();
+    else
+      moveDropDown();
 
-  if (rotateTarget.length() == 0) {
-    rotateTarget = "stop";
+    delay(5);
   }
-
-  if (rotateTarget == "stop") {
-    rotateMoving = false;
-    rotateMoveDurationMs = 0;
-    rotateTargetAngle = rotateCurrentAngle;
-    stopRotateMotor();
-  } else if (rotateTarget == "cw") {
-    rotateMoving = true;
-    rotateMoveStartedAt = millis();
-    rotateMoveDurationMs = ROTATE_FULL_SWEEP_TIME_MS;
-    runRotateMotor(abs(speedValue));
-  } else if (rotateTarget == "ccw") {
-    rotateMoving = true;
-    rotateMoveStartedAt = millis();
-    rotateMoveDurationMs = ROTATE_FULL_SWEEP_TIME_MS;
-    runRotateMotor(-abs(speedValue));
-  }
-
-  publishRotateState();
 }
 
+// =====================================================
+// MQTT CALLBACK
+// =====================================================
 
-void handleDropCommand(JsonDocument& doc) {
-  dropTarget = String((const char*)(doc["target"] | "hold"));
-  int speedValue = doc["motor_speed"] | doc["speed"] | 180;
+void mqttCallback(char* topic, byte* payload, unsigned int length)
+{
+  String t = topic;
 
-  if (dropTarget == "hold") {
-    dropMoving = false;
-    stopDropMotors();
-  } else if (dropTarget == "bottom") {
-    dropMoving = true;
-    dropMoveStartedAt = millis();
-    runDropMotors(-abs(speedValue));
-  } else if (dropTarget == "top") {
-    dropMoving = true;
-    dropMoveStartedAt = millis();
-    runDropMotors(abs(speedValue));
-  }
-
-  publishDropState();
-}
-
-
-void mqttCallback(char* topic, byte* payload, unsigned int length) {
   StaticJsonDocument<256> doc;
-  DeserializationError error = deserializeJson(doc, payload, length);
+  deserializeJson(doc, payload, length);
 
-  if (error) {
+  if (t == "ride/system/estop")
+  {
+    stopDrop();
     return;
   }
 
-  String topicString = topic;
+  // switch track servo
+  if (t == "ride/actuator/switchTrack/command")
+  {
+    switchTarget = constrain(doc["target_angle"] | 0, 0, 180);
+  }
 
-  if (topicString == "ride/actuator/switchTrack/command") {
-    handleSwitchCommand(doc);
-  } else if (topicString == "ride/actuator/rotateTrack/command") {
-    handleRotateCommand(doc);
-  } else if (topicString == "ride/actuator/dropTrack/command") {
-    handleDropCommand(doc);
-  } else if (topicString == "ride/system/estop") {
-    bool active = doc["active"] | false;
-    if (active) {
-      rotateMoving = false;
-      dropMoving = false;
-      stopRotateMotor();
-      stopDropMotors();
-      publishRotateState();
-      publishDropState();
-    }
+  // turntable servo
+  else if (t == "ride/actuator/rotateTrack/command")
+  {
+    turnTarget = constrain(doc["target_angle"] | 0, 0, 180);
+  }
+
+  // drop track
+  else if (t == "ride/actuator/dropTrack/command")
+  {
+    String cmd = doc["target"] | "stop";
+
+    if (cmd == "top")
+      goDropTo(DROP_TOP);
+    else if (cmd == "bottom")
+      goDropTo(DROP_BOTTOM);
+    else
+      stopDrop();
   }
 }
 
+// =====================================================
+// WIFI
+// =====================================================
 
-void reconnectMqtt() {
-  while (!mqttClient.connected()) {
-    if (mqttClient.connect("track_sensors")) {
+void connectWifi()
+{
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  while (WiFi.status() != WL_CONNECTED)
+    delay(500);
+}
+
+void reconnectMqtt()
+{
+  while (!mqttClient.connected())
+  {
+    if (mqttClient.connect("ride_controller"))
+    {
       mqttClient.subscribe("ride/actuator/switchTrack/command");
-      mqttClient.subscribe("ride/actuator/rotateTrack/command");
       mqttClient.subscribe("ride/actuator/dropTrack/command");
+      mqttClient.subscribe("ride/actuator/rotateTrack/command");
       mqttClient.subscribe("ride/system/estop");
-      publishSwitchState();
-      publishRotateState();
-      publishDropState();
-    } else {
+    }
+    else
+    {
       delay(2000);
     }
   }
 }
 
+// =====================================================
+// SENSOR CHECK
+// =====================================================
 
-void setup() {
+void checkSensors()
+{
+  bool station = digitalRead(SENSOR_STATION);
+  bool sw1     = digitalRead(SENSOR_SWITCH1);
+  bool sw2     = digitalRead(SENSOR_SWITCH2);
+  bool rot1    = digitalRead(SENSOR_ROTATE1);
+  bool top     = digitalRead(SENSOR_DROP2_TOP);
+  bool bot     = digitalRead(SENSOR_DROP1_BOTTOM);
+
+  if (station == LOW && lastStation == HIGH)
+    mqttClient.publish("ride/sensor/Station1/state", "{\"state\":1}");
+  if (station == HIGH && lastStation == LOW)
+    mqttClient.publish("ride/sensor/Station1/state", "{\"state\":0}");
+
+  if (sw1 == LOW && lastSwitch1 == HIGH)
+    mqttClient.publish("ride/sensor/Switch1/state", "{\"state\":1}");
+  if (sw1 == HIGH && lastSwitch1 == LOW)
+    mqttClient.publish("ride/sensor/Switch1/state", "{\"state\":0}");
+
+  if (sw2 == LOW && lastSwitch2 == HIGH)
+    mqttClient.publish("ride/sensor/Switch2/state", "{\"state\":1}");
+  if (sw2 == HIGH && lastSwitch2 == LOW)
+    mqttClient.publish("ride/sensor/Switch2/state", "{\"state\":0}");
+
+  if (rot1 == LOW && lastRotate1 == HIGH)
+    mqttClient.publish("ride/sensor/Rotate1/state", "{\"state\":1}");
+  if (rot1 == HIGH && lastRotate1 == LOW)
+    mqttClient.publish("ride/sensor/Rotate1/state", "{\"state\":0}");
+
+  if (bot == LOW && lastDropBot == HIGH)
+    mqttClient.publish("ride/sensor/Drop1/state", "{\"state\":1}");
+  if (bot == HIGH && lastDropBot == LOW)
+    mqttClient.publish("ride/sensor/Drop1/state", "{\"state\":0}");
+
+  if (top == LOW && lastDropTop == HIGH)
+    mqttClient.publish("ride/sensor/Drop2/state", "{\"state\":1}");
+  if (top == HIGH && lastDropTop == LOW)
+    mqttClient.publish("ride/sensor/Drop2/state", "{\"state\":0}");
+
+  lastStation = station;
+  lastSwitch1 = sw1;
+  lastSwitch2 = sw2;
+  lastRotate1 = rot1;
+  lastDropTop = top;
+  lastDropBot = bot;
+}
+
+// =====================================================
+// SETUP
+// =====================================================
+
+void setup()
+{
   Serial.begin(115200);
+  delay(1000);
 
-  pinMode(ROTATE_MOTOR_FORWARD_PIN, OUTPUT);
-  pinMode(ROTATE_MOTOR_REVERSE_PIN, OUTPUT);
-  pinMode(DROP_MOTOR_A_FORWARD_PIN, OUTPUT);
-  pinMode(DROP_MOTOR_A_REVERSE_PIN, OUTPUT);
-  pinMode(DROP_MOTOR_B_FORWARD_PIN, OUTPUT);
-  pinMode(DROP_MOTOR_B_REVERSE_PIN, OUTPUT);
+  Wire.begin();
 
-  stopRotateMotor();
-  stopDropMotors();
+  pwm.begin();
+  pwm.setPWMFreq(50);   // servos need 50Hz
 
-  for (int i = 0; i < SENSOR_COUNT; i++) {
-    pinMode(IR_SENSOR_PINS[i], INPUT_PULLUP);  // Change if your IR modules need plain INPUT.
-    lastSensorStates[i] = digitalRead(IR_SENSOR_PINS[i]);
-  }
+  stopDrop();
 
-  switchServo.attach(SWITCH_SERVO_PIN);
-  switchServo.write(switchCurrentAngle);
+  setServoChannel(SWITCH_SERVO, 0);
+  setServoChannel(TURN_SERVO, 7);
+
+  pinMode(ENC_A, INPUT_PULLUP);
+  pinMode(ENC_B, INPUT_PULLUP);
+
+  lastEncoded =
+    (digitalRead(ENC_A) << 1) |
+     digitalRead(ENC_B);
+
+  attachInterrupt(digitalPinToInterrupt(ENC_A), isrDrop, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(ENC_B), isrDrop, CHANGE);
+
+  pinMode(SENSOR_STATION, INPUT_PULLUP);
+  pinMode(SENSOR_SWITCH1, INPUT_PULLUP);
+  pinMode(SENSOR_SWITCH2, INPUT_PULLUP);
+  pinMode(SENSOR_ROTATE1, INPUT_PULLUP);
+  pinMode(SENSOR_DROP2_TOP, INPUT_PULLUP);
+  pinMode(SENSOR_DROP1_BOTTOM, INPUT_PULLUP);
+
+  dropCount = DROP_TOP;
 
   connectWifi();
+
   mqttClient.setServer(MQTT_BROKER, MQTT_PORT);
   mqttClient.setCallback(mqttCallback);
+
+  Serial.println("SYSTEM READY");
 }
 
+// =====================================================
+// LOOP
+// =====================================================
 
-void updateSensors() {
-  for (int i = 0; i < SENSOR_COUNT; i++) {
-    int state = digitalRead(IR_SENSOR_PINS[i]);
-
-    if (state != lastSensorStates[i]) {
-      // The payload reports 1 when the beam is broken. Invert here if your sensors behave differently.
-      int activeState = (state == LOW) ? 1 : 0;
-      publishSensorState(IR_SENSOR_NAMES[i], activeState);
-      lastSensorStates[i] = state;
-    }
-  }
-}
-
-
-void updateSwitchServo() {
-  static unsigned long lastServoStepAt = 0;
-
-  if (millis() - lastServoStepAt < 20) {
-    return;
-  }
-
-  lastServoStepAt = millis();
-
-  if (switchCurrentAngle < switchTargetAngle) {
-    switchCurrentAngle++;
-    switchServo.write(switchCurrentAngle);
-    publishSwitchState();
-  } else if (switchCurrentAngle > switchTargetAngle) {
-    switchCurrentAngle--;
-    switchServo.write(switchCurrentAngle);
-    publishSwitchState();
-  }
-}
-
-
-void updateRotateMotor() {
-  if (!rotateMoving) {
-    return;
-  }
-
-  if (millis() - rotateMoveStartedAt >= rotateMoveDurationMs) {
-    rotateMoving = false;
-    rotateCurrentAngle = rotateTargetAngle;
-    stopRotateMotor();
-    publishRotateState();
-  }
-}
-
-
-void updateDropMotors() {
-  if (!dropMoving) {
-    return;
-  }
-
-  if (millis() - dropMoveStartedAt >= DROP_MOVE_TIME_MS) {
-    dropMoving = false;
-    stopDropMotors();
-    publishDropState();
-  }
-}
-
-
-void loop() {
-  if (!mqttClient.connected()) {
+void loop()
+{
+  if (!mqttClient.connected())
     reconnectMqtt();
-  }
 
   mqttClient.loop();
-  updateSensors();
-  updateSwitchServo();
-  updateRotateMotor();
-  updateDropMotors();
+
+  checkSensors();
+
+  // smooth switch servo
+  if (switchCurrent < switchTarget)
+  {
+    switchCurrent++;
+    setServoChannel(SWITCH_SERVO, switchCurrent);
+    delay(10);
+  }
+  else if (switchCurrent > switchTarget)
+  {
+    switchCurrent--;
+    setServoChannel(SWITCH_SERVO, switchCurrent);
+    delay(10);
+  }
+
+  // smooth turntable servo
+  if (turnCurrent < turnTarget)
+  {
+    turnCurrent++;
+    setServoChannel(TURN_SERVO, turnCurrent);
+    delay(10);
+  }
+  else if (turnCurrent > turnTarget)
+  {
+    turnCurrent--;
+    setServoChannel(TURN_SERVO, turnCurrent);
+    delay(10);
+  }
 }

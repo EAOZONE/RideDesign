@@ -305,9 +305,9 @@ export default function App() {
                   <p className="text-xs font-bold font-mono text-zinc-300">Vehicle ({vehicle.id})</p>
                   <div className="grid grid-cols-5 items-center gap-2">
                     <label className="text-[9px] font-mono text-zinc-400 col-span-1">Speed</label>
-                    <input type="range" min="-1" max="1" step="0.1" key={`speed-${vehicle.speed}`} defaultValue={vehicle.speed}
-                      onMouseUp={(e) => handleVehicleSpeedChange(parseFloat(e.currentTarget.value))}
-                      onTouchEnd={(e) => handleVehicleSpeedChange(parseFloat(e.currentTarget.value))}
+                    <input type="range" min="-255" max="255" step="1" key={`speed-${vehicle.speed}`} defaultValue={vehicle.speed}
+                      onMouseUp={(e) => handleVehicleSpeedChange(parseInt(e.currentTarget.value))}
+                      onTouchEnd={(e) => handleVehicleSpeedChange(parseInt(e.currentTarget.value))}
                       className="col-span-3 h-1 bg-zinc-800 rounded-lg appearance-none cursor-pointer" />
                     <button onClick={() => handleVehicleSpeedChange(0)} className="text-[9px] font-mono p-1 bg-zinc-800 rounded hover:bg-zinc-700">STOP</button>
                   </div>

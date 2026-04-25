@@ -31,7 +31,8 @@ The application is designed to run both the web server and the ride controller s
     npm run dev
     ```
     This command will:
-    *   Start the **MQTT Broker** (on port 1883 for TCP and port 3000 for WebSockets).
+    *   Start the **MQTT Broker** on port 1883, or reuse an existing broker if port 1883 is already occupied.
+    *   Expose MQTT WebSockets at `/mqtt` on port 3000 for the browser dashboard.
     *   Launch the **Python Ride Controller** (`ride_controller.py`) in the background.
     *   Start the **Vite Development Server** for the React UI.
 

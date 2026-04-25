@@ -2,15 +2,72 @@ import express from "express";
 import path from "path";
 import { spawn } from "child_process";
 import { createServer as createHttpServer } from "http";
+import { createConnection, createServer as createMqttTcpServer } from "net";
+import Aedes from "aedes";
+import websocketStream from "websocket-stream";
 
 async function startServer() {
   const app = express();
   const PORT = 3000;
   const isProduction = process.env.NODE_ENV === "production" || process.argv.includes("--production");
-  const mqttHost = process.env.MQTT_HOST || "localhost";
+  const mqttHost = process.env.MQTT_HOST || "0.0.0.0";
+  const mqttUpstreamHost = process.env.MQTT_UPSTREAM_HOST || "127.0.0.1";
   const mqttTcpPort = Number(process.env.MQTT_TCP_PORT || 1883);
-  const mqttWsPort = Number(process.env.MQTT_WS_PORT || 9001);
   const httpServer = createHttpServer(app);
+  const mqttBroker = Aedes();
+  const mqttTcpServer = createMqttTcpServer(mqttBroker.handle);
+  let mqttMode = "embedded";
+
+  mqttBroker.on("clientError", (client, err) => {
+    console.error(`[MQTT] client error ${client?.id || "unknown"}:`, err.message);
+  });
+
+  mqttBroker.on("connectionError", (client, err) => {
+    console.error(`[MQTT] connection error ${client?.id || "unknown"}:`, err.message);
+  });
+
+  await new Promise((resolve, reject) => {
+    mqttTcpServer.once("error", (err) => {
+      if (err.code !== "EADDRINUSE") {
+        reject(err);
+        return;
+      }
+
+      mqttMode = "external";
+      console.warn(
+        `MQTT port ${mqttTcpPort} is already in use; using existing broker at mqtt://${mqttUpstreamHost}:${mqttTcpPort}`,
+      );
+      resolve();
+    });
+
+    mqttTcpServer.listen(mqttTcpPort, mqttHost, () => {
+      console.log(`MQTT broker listening at mqtt://${mqttHost}:${mqttTcpPort}`);
+      resolve();
+    });
+  });
+
+  websocketStream.createServer(
+    {
+      server: httpServer,
+      path: "/mqtt",
+      perMessageDeflate: false,
+    },
+    (stream) => {
+      if (mqttMode === "embedded") {
+        mqttBroker.handle(stream);
+        return;
+      }
+
+      const socket = createConnection(mqttTcpPort, mqttUpstreamHost);
+
+      stream.pipe(socket).pipe(stream);
+
+      socket.on("error", (err) => {
+        console.error(`[MQTT] upstream connection error:`, err.message);
+        stream.destroy(err);
+      });
+    },
+  );
 
   // 1. Spawn Ride Controller (Python)
   let pythonCmd = "python3";
@@ -41,10 +98,10 @@ async function startServer() {
     res.json({
       status: "ok",
       mqtt: {
-        mode: "external",
-        host: mqttHost,
+        mode: mqttMode,
+        host: mqttMode === "embedded" ? mqttHost : mqttUpstreamHost,
         tcpPort: mqttTcpPort,
-        wsPort: mqttWsPort,
+        wsPath: "/mqtt",
       },
     });
   });
@@ -67,8 +124,7 @@ async function startServer() {
 
   httpServer.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://localhost:${PORT}`);
-    console.log(`Using external MQTT broker at mqtt://${mqttHost}:${mqttTcpPort}`);
-    console.log(`Using external MQTT WebSockets at ws://${mqttHost}:${mqttWsPort}`);
+    console.log(`MQTT WebSockets available at ws://localhost:${PORT}/mqtt`);
   });
 }
 

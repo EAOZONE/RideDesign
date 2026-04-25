@@ -25,6 +25,7 @@ SENSOR_IDS = [
     "Switch2",
     "Rotate1",
     "Drop1",
+    "Drop2",
     "Station2",
 ]
 
@@ -37,14 +38,18 @@ SAVED_RIDE_ANGLE_PROFILES: dict[str, list[dict[str, int | str]]] = {
         {"sensor_id": "Switch2", "yaw": 60, "pitch": 90},
         {"sensor_id": "Rotate1", "yaw": 90, "pitch": 90},
         {"sensor_id": "Drop1", "yaw": 90, "pitch": 65},
+        {"sensor_id": "Drop2", "yaw": 90, "pitch": 65},
         {"sensor_id": "Station2", "yaw": 90, "pitch": 90},
     ],
 }
 
 ACTIVE_RIDE_PROFILE = "default"
 
+SWITCH_TRACK_DIVERGE_ANGLE = 90
+SWITCH_TRACK_REVERSE_SPEED = -90
+
 STATION_TO_SWITCH_TIMED_SEQUENCE = [
-    {"delay": 0.0, "speed": 0.35, "yaw": 90, "pitch": 100},
+    {"delay": 0.0, "speed": 90, "yaw": 90, "pitch": 100},
     {"delay": 1.0, "yaw": 120, "pitch": 80},
     {"delay": 2.5, "yaw": 60, "pitch": 110},
 ]
@@ -54,7 +59,7 @@ estop_active = False
 
 vehicles: dict[str, dict[str, Any]] = {
     vehicle_id: {
-        "drive": {"speed": 0.0, "left_speed": 0, "right_speed": 0, "moving": False},
+        "drive": {"speed": 0, "left_speed": 0, "right_speed": 0, "moving": False},
         "servoYaw": {"angle": 90},
         "servoPitch": {"angle": 90},
         "last_seen": 0.0,
@@ -74,7 +79,7 @@ scheduled_actions: list[tuple[float, Callable[[], None]]] = []
 scheduled_actions_lock = threading.Lock()
 
 # For paho-mqtt 2.0 compatibility, we should ideally specify callback_api_version
-# but we'll try to keep it simple for now. 
+# but we'll try to keep it simple for now.
 client = mqtt.Client()
 
 
@@ -142,8 +147,8 @@ def process_sensor(sensor_id: str, state: int) -> None:
         schedule_station_to_switch_sequence("0")
 
     elif sensor_id == "Switch1":
-        drive_vehicle("0", speed=0.0)
-        command_switch_track(90)
+        drive_vehicle("0", speed=0)
+        command_switch_track(SWITCH_TRACK_DIVERGE_ANGLE)
         switch_waiting_for_alignment = True
 
     elif sensor_id == "Switch2" and switch_waiting_for_clear:
@@ -151,15 +156,18 @@ def process_sensor(sensor_id: str, state: int) -> None:
         switch_waiting_for_clear = False
 
     elif sensor_id == "Rotate1":
-        drive_vehicle("0", speed=0.0)
+        drive_vehicle("0", speed=0)
         command_turntable(90)
 
     elif sensor_id == "Drop1":
-        drive_vehicle("0", speed=0.0)
+        drive_vehicle("0", speed=0)
         command_drop_track("bottom", motor_a_speed=180, motor_b_speed=180)
+    elif sensor_id == "Drop2":
+        drive_vehicle("0", speed=255)
+        command_drop_track("top", motor_a_speed=180, motor_b_speed=180)
 
     elif sensor_id == "Station2":
-        drive_vehicle("0", speed=0.0)
+        drive_vehicle("0", speed=0)
 
 
 def apply_saved_ride_angles(vehicle_id: str, sensor_id: str) -> None:
@@ -223,7 +231,7 @@ def schedule_station_to_switch_sequence(vehicle_id: str) -> None:
 
         def run_step(sequence_step=step) -> None:
             if "speed" in sequence_step:
-                drive_vehicle(vehicle_id, speed=float(sequence_step["speed"]))
+                drive_vehicle(vehicle_id, speed=int(sequence_step["speed"]))
 
             if "yaw" in sequence_step:
                 set_yaw(vehicle_id, int(sequence_step["yaw"]))
@@ -266,8 +274,12 @@ def handle_actuator_state(topic: str, data: dict[str, Any]) -> None:
         angle = data.get("angle")
         moving = data.get("moving", False)
 
-        if switch_waiting_for_alignment and angle == 90 and not moving:
-            drive_vehicle("0", speed=0.35)
+        if (
+            switch_waiting_for_alignment
+            and angle == SWITCH_TRACK_DIVERGE_ANGLE
+            and not moving
+        ):
+            drive_vehicle("0", speed=SWITCH_TRACK_REVERSE_SPEED)
             switch_waiting_for_alignment = False
             switch_waiting_for_clear = True
 
@@ -276,14 +288,14 @@ def handle_actuator_state(topic: str, data: dict[str, Any]) -> None:
         moving = data.get("moving", False)
 
         if angle == 90 and not moving:
-            drive_vehicle("0", speed=0.30)
+            drive_vehicle("0", speed=75)
 
     elif actuator == "dropTrack":
         target = data.get("target")
         moving = data.get("moving", False)
 
         if target == "bottom" and not moving:
-            drive_vehicle("0", speed=0.25)
+            drive_vehicle("0", speed=65)
 
 
 def handle_estop(data: dict[str, Any]) -> None:
@@ -324,17 +336,17 @@ def handle_reset() -> None:
 
 def drive_vehicle(
     vehicle_id: str,
-    speed: float,
+    speed: int,
     left_speed: int | None = None,
     right_speed: int | None = None,
 ) -> None:
     if left_speed is None or right_speed is None:
-        pwm = max(-255, min(255, int(speed * 255)))
+        pwm = max(-255, min(255, int(speed)))
         left_speed = pwm
         right_speed = pwm
 
     payload = {
-        "speed": speed,
+        "speed": max(-255, min(255, int(speed))),
         "left_speed": left_speed,
         "right_speed": right_speed,
     }
@@ -382,7 +394,7 @@ def command_drop_track(target: str, motor_a_speed: int, motor_b_speed: int) -> N
 
 def stop_all_vehicles() -> None:
     for vehicle_id in vehicles:
-        drive_vehicle(vehicle_id, speed=0.0, left_speed=0, right_speed=0)
+        drive_vehicle(vehicle_id, speed=0, left_speed=0, right_speed=0)
 
 
 def send_heartbeat() -> None:

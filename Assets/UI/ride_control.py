@@ -131,7 +131,8 @@ def process_sensor(sensor_id: str, state: int) -> None:
     elif sensor_id == "Drop1":
         drive_vehicle("0", speed=0.0)
         command_drop_track("bottom", motor_a_speed=180, motor_b_speed=180)
-
+    elif sensor_id=="Drop2":
+        command_drop_track("top", motor_a_speed=180, motor_b_speed=180)
     elif sensor_id == "Station2":
         drive_vehicle("0", speed=0.0)
         set_yaw("0", 90)

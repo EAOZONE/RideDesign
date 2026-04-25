@@ -13,8 +13,8 @@ PubSubClient client(espClient);
 // ✅ KEEPING YOUR PINS
 const int LEFT_MOTOR_FORWARD = D7;
 const int LEFT_MOTOR_REVERSE = D8;
-const int RIGHT_MOTOR_FORWARD = D9;
-const int RIGHT_MOTOR_REVERSE = D10;
+const int RIGHT_MOTOR_FORWARD = D5;
+const int RIGHT_MOTOR_REVERSE = D6;
 
 const int YAW_SERVO_PIN = D2;
 const int PITCH_SERVO_PIN = D3;
