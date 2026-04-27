@@ -107,7 +107,7 @@ export default function App() {
 
       if (vehicleId !== vehicle.id) return;
 
-      if (type === 'heartbeat') {
+      if (type === 'heartbeat' || type === 'ping') {
         setVehicle(prev => ({ ...prev, connected: true, lastHeartbeat: Date.now() }));
         return;
       }
@@ -428,7 +428,7 @@ export default function App() {
                     </div>
                     <div>
                       <div className="text-[8px] font-mono text-zinc-500 uppercase">Vehicle ID</div>
-                      <div className="text-[10px] font-bold font-mono">V-001</div>
+                      <div className="text-[10px] font-bold font-mono">0</div>
                     </div>
                   </div>
                   <div className="text-right">

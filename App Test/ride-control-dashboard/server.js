@@ -1,5 +1,6 @@
 import express from "express";
 import path from "path";
+import fs from "fs";
 import { spawn } from "child_process";
 import { createServer as createHttpServer } from "http";
 import { createConnection, createServer as createMqttTcpServer } from "net";
@@ -111,9 +112,31 @@ async function startServer() {
     const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
       server: { middlewareMode: true },
-      appType: "spa",
+      appType: "custom", // Recommended for custom middleware setups
     });
     app.use(vite.middlewares);
+
+    // Serve index.html in development
+    app.use("*", async (req, res, next) => {
+      const url = req.originalUrl;
+      try {
+        // 1. Read index.html
+        let template = fs.readFileSync(path.resolve(process.cwd(), "index.html"), "utf-8");
+
+        // 2. Apply Vite HTML transforms. This injects the Vite HMR client, and
+        //    also applies HTML transforms from Vite plugins, e.g. global preambles
+        //    from @vitejs/plugin-react
+        template = await vite.transformIndexHtml(url, template);
+
+        // 3. Send the rendered HTML back.
+        res.status(200).set({ "Content-Type": "text/html" }).end(template);
+      } catch (e) {
+        // If an error is caught, let Vite fix the stack trace so it maps back to
+        // your actual source code.
+        vite.ssrFixStacktrace(e);
+        next(e);
+      }
+    });
   } else {
     const distPath = path.join(process.cwd(), "dist");
     app.use(express.static(distPath));
@@ -131,3 +154,4 @@ async function startServer() {
 startServer().catch((err) => {
   console.error("Failed to start server:", err);
 });
+

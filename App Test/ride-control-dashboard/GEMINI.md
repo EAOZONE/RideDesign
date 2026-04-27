@@ -105,3 +105,5 @@ Due to a known UI bug in the current extension build, **you must NEVER output mo
 4. Wait for the user's prompt before moving to the next file.
 
 "Do not defer to sub-agents or the generalist agent. Process this request in the main session."
+
+The password to the raspberry pi is "TPED" you can use then when sshing

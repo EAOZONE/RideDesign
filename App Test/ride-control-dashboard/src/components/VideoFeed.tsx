@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Camera, Settings, RefreshCw, Maximize2 } from 'lucide-react';
 
 export const VideoFeed: React.FC = () => {
-  const [url, setUrl] = useState<string>('http://192.168.1.100/stream'); // Default placeholder
+  const [url, setUrl] = useState<string>('http://192.168.1.118'); // Updated default URL
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isLoaded, setIsLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -54,7 +54,7 @@ export const VideoFeed: React.FC = () => {
                 value={url} 
                 onChange={(e) => setUrl(e.target.value)}
                 className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-4 py-2 text-white font-mono text-xs focus:outline-none focus:border-orange-500"
-                placeholder="http://192.168.1.x/stream"
+                placeholder="http://192.168.1.x"
               />
             </div>
             <button 
@@ -86,7 +86,7 @@ export const VideoFeed: React.FC = () => {
         <img 
           src={url} 
           alt="ESP32 Camera Feed"
-          className={`w-full h-full object-cover transition-opacity duration-500 ${isLoaded ? 'opacity-100' : 'opacity-0'}`}
+          className={`w-full h-full object-cover transition-opacity duration-500 scale-y-[-1] ${isLoaded ? 'opacity-100' : 'opacity-0'}`}
           onLoad={() => setIsLoaded(true)}
           onError={() => {
             setError('Failed to load stream');

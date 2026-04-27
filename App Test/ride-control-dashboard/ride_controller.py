@@ -78,9 +78,8 @@ switch_waiting_for_clear = False
 scheduled_actions: list[tuple[float, Callable[[], None]]] = []
 scheduled_actions_lock = threading.Lock()
 
-# For paho-mqtt 2.0 compatibility, we should ideally specify callback_api_version
-# but we'll try to keep it simple for now.
-client = mqtt.Client()
+# For paho-mqtt 2.0 compatibility, we specify callback_api_version
+client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION1)
 
 
 def publish_json(topic: str, payload: dict[str, Any]) -> None:
