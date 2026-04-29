@@ -10,19 +10,17 @@ const char* mqtt_server = "192.168.1.116";
 WiFiClient espClient;
 PubSubClient client(espClient);
 
-// ✅ KEEPING YOUR PINS
+// ✅ PIN DEFINITIONS
 const int LEFT_MOTOR_FORWARD = D7;
 const int LEFT_MOTOR_REVERSE = D8;
 const int RIGHT_MOTOR_FORWARD = D5;
 const int RIGHT_MOTOR_REVERSE = D6;
 
 const int YAW_SERVO_PIN = D2;
-const int PITCH_SERVO_PIN = D3;
 
 Servo yawServo;
-Servo pitchServo;
 
-// ✅ PWM setup for ESP32 (replaces analogWrite safely)
+// ✅ PWM setup for Motors
 const int PWM_FREQ = 1000;
 const int PWM_RESOLUTION = 8;
 
@@ -52,7 +50,6 @@ void setup_wifi() {
   Serial.println(WiFi.localIP());
 }
 
-// ✅ Proper ESP32 PWM motor control
 void setMotorChannel(int chFwd, int chRev, int speedValue) {
   int clamped = constrain(speedValue, -255, 255);
 
@@ -92,11 +89,7 @@ void callback(char* topic, byte* payload, unsigned int length) {
       rightSpeed = doc["right_speed"] | 0;
     } else if (doc.containsKey("speed")) {
       leftSpeed = rightSpeed = doc["speed"] | 0;
-    } else if (doc.containsKey("pwm")) {
-      leftSpeed = rightSpeed = doc["pwm"] | 0;
     }
-
-    Serial.printf("Drive L=%d R=%d\n", leftSpeed, rightSpeed);
 
     setMotorChannel(CH_LEFT_FWD, CH_LEFT_REV, leftSpeed);
     setMotorChannel(CH_RIGHT_FWD, CH_RIGHT_REV, rightSpeed);
@@ -106,11 +99,6 @@ void callback(char* topic, byte* payload, unsigned int length) {
     Serial.printf("Yaw -> %d\n", angle);
     yawServo.write(angle);
   }
-  else if (topicStr == "ride/vehicle/0/servoPitch/command") {
-    int angle = constrain(doc["angle"] | 90, 0, 180);
-    Serial.printf("Pitch -> %d\n", angle);
-    pitchServo.write(angle);
-  }
 }
 
 void reconnect() {
@@ -118,10 +106,8 @@ void reconnect() {
     Serial.print("Attempting MQTT connection...");
     if (client.connect("RideVehicleESP")) {
       Serial.println("connected");
-
       client.subscribe("ride/vehicle/0/drive/command");
       client.subscribe("ride/vehicle/0/servoYaw/command");
-      client.subscribe("ride/vehicle/0/servoPitch/command");
     } else {
       Serial.print("failed, rc=");
       Serial.println(client.state());
@@ -137,28 +123,20 @@ void setup() {
   client.setServer(mqtt_server, 1883);
   client.setCallback(callback);
 
-  // ✅ Setup PWM channels
+  // Setup Motor PWM
   ledcAttach(LEFT_MOTOR_FORWARD, PWM_FREQ, CH_LEFT_FWD);
   ledcAttach(LEFT_MOTOR_REVERSE, PWM_FREQ, CH_LEFT_REV);
   ledcAttach(RIGHT_MOTOR_FORWARD, PWM_FREQ, CH_RIGHT_FWD);
   ledcAttach(RIGHT_MOTOR_REVERSE, PWM_FREQ, CH_RIGHT_REV);
 
-  // Stop motors
   setMotorChannel(CH_LEFT_FWD, CH_LEFT_REV, 0);
   setMotorChannel(CH_RIGHT_FWD, CH_RIGHT_REV, 0);
 
-  // ✅ CRITICAL FIX: Proper servo setup (from your reference code)
-  ESP32PWM::allocateTimer(0);
-  ESP32PWM::allocateTimer(1);
-
+  // Setup Servo - Using Timer 3 to avoid motor PWM conflict (0-2)
+  ESP32PWM::allocateTimer(3);
   yawServo.setPeriodHertz(50);
-  pitchServo.setPeriodHertz(50);
-
   yawServo.attach(YAW_SERVO_PIN, 500, 2400);
-  pitchServo.attach(PITCH_SERVO_PIN, 500, 2400);
-
   yawServo.write(90);
-  pitchServo.write(90);
 
   Serial.println("Setup complete");
 }
@@ -167,7 +145,6 @@ void loop() {
   if (!client.connected()) {
     reconnect();
   }
-
   client.loop();
 
   unsigned long now = millis();

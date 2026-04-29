@@ -12,9 +12,10 @@ export function useMqtt() {
   const [status, setStatus] = useState<'connecting' | 'connected' | 'error' | 'offline'>('connecting');
 
   useEffect(() => {
-    // Connect to the MQTT broker via WebSockets on the same host
+    // Connect to the MQTT broker via WebSockets on port 9001
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const brokerUrl = `${protocol}//${window.location.host}/mqtt`;
+    // Use the same host but fixed port 9001 for Mosquitto WebSockets
+    const brokerUrl = `${protocol}//${window.location.hostname}:9001`;
     
     console.log('Connecting to MQTT at:', brokerUrl);
     

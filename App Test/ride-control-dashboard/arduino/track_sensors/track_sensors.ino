@@ -41,7 +41,7 @@ Adafruit_PWMServoDriver pwm = Adafruit_PWMServoDriver(0x40);
 // =====================================================
 
 const int SWITCH_SERVO = 0;
-const int TURN_SERVO   = 8;
+const int TURN_SERVO   = 10;
 
 // Drop motors
 const int DL_FWD = 3;
@@ -53,8 +53,13 @@ const int DR_REV = 2;
 // SERVO SETTINGS
 // =====================================================
 
-const int SERVO_MIN = 120;
-const int SERVO_MAX = 620;
+// Switch Track Calibration
+const int SWITCH_MIN = 110;
+const int SWITCH_MAX = 900;
+
+// Turntable Calibration
+const int TURN_MIN = 120;
+const int TURN_MAX = 620;
 
 // switch track
 int switchCurrent = 0;
@@ -111,15 +116,24 @@ void setPWM(int ch, int val)
   pwm.setPWM(ch, 0, val);
 }
 
-int angleToPulse(int angle)
+int angleToPulse(int angle, int minPulse, int maxPulse)
 {
   angle = constrain(angle, 0, 180);
-  return map(angle, 0, 180, SERVO_MIN, SERVO_MAX);
+  return map(angle, 0, 180, minPulse, maxPulse);
 }
 
 void setServoChannel(int ch, int angle)
 {
-  pwm.setPWM(ch, 0, angleToPulse(angle));
+  int pulse;
+  if (ch == SWITCH_SERVO) {
+    pulse = angleToPulse(angle, SWITCH_MIN, SWITCH_MAX);
+  } else if (ch == TURN_SERVO) {
+    pulse = angleToPulse(angle, TURN_MIN, TURN_MAX);
+  } else {
+    // Default fallback
+    pulse = angleToPulse(angle, 120, 620);
+  }
+  pwm.setPWM(ch, 0, pulse);
 }
 
 // =====================================================
@@ -223,11 +237,18 @@ void mqttCallback(char* topic, byte* payload, unsigned int length)
 {
   String t = topic;
 
+  Serial.print("MQTT [");
+  Serial.print(t);
+  Serial.print("] Payload: ");
+  for (int i = 0; i < length; i++) Serial.print((char)payload[i]);
+  Serial.println();
+
   StaticJsonDocument<256> doc;
   deserializeJson(doc, payload, length);
 
   if (t == "ride/system/estop")
   {
+    Serial.println("!!! E-STOP RECEIVED !!!");
     stopDrop();
     return;
   }
@@ -236,18 +257,24 @@ void mqttCallback(char* topic, byte* payload, unsigned int length)
   if (t == "ride/actuator/switchTrack/command")
   {
     switchTarget = constrain(doc["target_angle"] | 0, 0, 180);
+    Serial.print("Switch Track Target -> ");
+    Serial.println(switchTarget);
   }
 
   // turntable servo
   else if (t == "ride/actuator/rotateTrack/command")
   {
     turnTarget = constrain(doc["target_angle"] | 0, 0, 180);
+    Serial.print("Turntable Target -> ");
+    Serial.println(turnTarget);
   }
 
   // drop track
   else if (t == "ride/actuator/dropTrack/command")
   {
     String cmd = doc["target"] | "stop";
+    Serial.print("Drop Track Cmd: ");
+    Serial.println(cmd);
 
     if (cmd == "top")
       goDropTo(DROP_TOP);
@@ -264,17 +291,26 @@ void mqttCallback(char* topic, byte* payload, unsigned int length)
 
 void connectWifi()
 {
+  Serial.print("Connecting to WiFi: ");
+  Serial.println(WIFI_SSID);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-  while (WiFi.status() != WL_CONNECTED)
+  while (WiFi.status() != WL_CONNECTED) {
     delay(500);
+    Serial.print(".");
+  }
+  Serial.println("\nWiFi Connected!");
+  Serial.print("IP: ");
+  Serial.println(WiFi.localIP());
 }
 
 void reconnectMqtt()
 {
   while (!mqttClient.connected())
   {
+    Serial.print("Attempting MQTT connection...");
     if (mqttClient.connect("ride_controller"))
     {
+      Serial.println("connected");
       mqttClient.subscribe("ride/actuator/switchTrack/command");
       mqttClient.subscribe("ride/actuator/dropTrack/command");
       mqttClient.subscribe("ride/actuator/rotateTrack/command");
@@ -282,6 +318,9 @@ void reconnectMqtt()
     }
     else
     {
+      Serial.print("failed, rc=");
+      Serial.print(mqttClient.state());
+      Serial.println(" try again in 2 seconds");
       delay(2000);
     }
   }
@@ -300,35 +339,59 @@ void checkSensors()
   bool top     = digitalRead(SENSOR_DROP2_TOP);
   bool bot     = digitalRead(SENSOR_DROP1_BOTTOM);
 
-  if (station == LOW && lastStation == HIGH)
+  if (station == LOW && lastStation == HIGH) {
+    Serial.println("Sensor: Station1 -> 1");
     mqttClient.publish("ride/sensor/Station1/state", "{\"state\":1}");
-  if (station == HIGH && lastStation == LOW)
+  }
+  if (station == HIGH && lastStation == LOW) {
+    Serial.println("Sensor: Station1 -> 0");
     mqttClient.publish("ride/sensor/Station1/state", "{\"state\":0}");
+  }
 
-  if (sw1 == LOW && lastSwitch1 == HIGH)
+  if (sw1 == LOW && lastSwitch1 == HIGH) {
+    Serial.println("Sensor: Switch1 -> 1");
     mqttClient.publish("ride/sensor/Switch1/state", "{\"state\":1}");
-  if (sw1 == HIGH && lastSwitch1 == LOW)
+  }
+  if (sw1 == HIGH && lastSwitch1 == LOW) {
+    Serial.println("Sensor: Switch1 -> 0");
     mqttClient.publish("ride/sensor/Switch1/state", "{\"state\":0}");
+  }
 
-  if (sw2 == LOW && lastSwitch2 == HIGH)
+  if (sw2 == LOW && lastSwitch2 == HIGH) {
+    Serial.println("Sensor: Switch2 -> 1");
     mqttClient.publish("ride/sensor/Switch2/state", "{\"state\":1}");
-  if (sw2 == HIGH && lastSwitch2 == LOW)
+  }
+  if (sw2 == HIGH && lastSwitch2 == LOW) {
+    Serial.println("Sensor: Switch2 -> 0");
     mqttClient.publish("ride/sensor/Switch2/state", "{\"state\":0}");
+  }
 
-  if (rot1 == LOW && lastRotate1 == HIGH)
+  if (rot1 == LOW && lastRotate1 == HIGH) {
+    Serial.println("Sensor: Rotate1 -> 1");
     mqttClient.publish("ride/sensor/Rotate1/state", "{\"state\":1}");
-  if (rot1 == HIGH && lastRotate1 == LOW)
+  }
+  if (rot1 == HIGH && lastRotate1 == LOW) {
+    Serial.println("Sensor: Rotate1 -> 0");
     mqttClient.publish("ride/sensor/Rotate1/state", "{\"state\":0}");
+  }
 
-  if (bot == LOW && lastDropBot == HIGH)
+  if (bot == LOW && lastDropBot == HIGH) {
+    Serial.println("Sensor: Drop1_Bottom -> 1");
     mqttClient.publish("ride/sensor/Drop1/state", "{\"state\":1}");
-  if (bot == HIGH && lastDropBot == LOW)
+  }
+  if (bot == HIGH && lastDropBot == LOW) {
+    Serial.println("Sensor: Drop1_Bottom -> 0");
     mqttClient.publish("ride/sensor/Drop1/state", "{\"state\":0}");
+  }
 
-  if (top == LOW && lastDropTop == HIGH)
+  if (top == LOW && lastDropTop == HIGH) {
+    Serial.println("Sensor: Drop2_Top -> 1");
     mqttClient.publish("ride/sensor/Drop2/state", "{\"state\":1}");
-  if (top == HIGH && lastDropTop == LOW)
+  }
+  if (top == HIGH && lastDropTop == LOW) {
+    Serial.println("Sensor: Drop2_Top -> 0");
     mqttClient.publish("ride/sensor/Drop2/state", "{\"state\":0}");
+  }
 
   lastStation = station;
   lastSwitch1 = sw1;
@@ -355,7 +418,12 @@ void setup()
   stopDrop();
 
   setServoChannel(SWITCH_SERVO, 0);
+  switchCurrent = 0;
+  switchTarget  = 0;
+
   setServoChannel(TURN_SERVO, 7);
+  turnCurrent = 7;
+  turnTarget  = 7;
 
   pinMode(ENC_A, INPUT_PULLUP);
   pinMode(ENC_B, INPUT_PULLUP);
@@ -415,13 +483,17 @@ void loop()
   if (turnCurrent < turnTarget)
   {
     turnCurrent++;
+    Serial.print("Turntable Moving UP: ");
+    Serial.println(turnCurrent);
     setServoChannel(TURN_SERVO, turnCurrent);
-    delay(10);
+    delay(5);
   }
   else if (turnCurrent > turnTarget)
   {
     turnCurrent--;
+    Serial.print("Turntable Moving DOWN: ");
+    Serial.println(turnCurrent);
     setServoChannel(TURN_SERVO, turnCurrent);
-    delay(10);
+    delay(5);
   }
 }

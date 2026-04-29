@@ -89,6 +89,7 @@ export default function App() {
   // Process incoming MQTT messages
   useEffect(() => {
     if (messages.length === 0) return;
+
     const { topic, payload } = messages[0];
 
     if (topic.startsWith('ride/sensor/')) {
@@ -103,11 +104,14 @@ export default function App() {
     } else if (topic.startsWith('ride/vehicle/')) {
       const parts = topic.split('/');
       const vehicleId = parts[2];
-      const type = parts[3]; // drive, servoYaw, servoPitch, heartbeat
+      const type = parts[3]; 
 
-      if (vehicleId !== vehicle.id) return;
+      // Debug: Log incoming vehicle messages
+      console.log(`Vehicle msg: ID=${vehicleId}, Type=${type}`, payload);
 
-      if (type === 'heartbeat' || type === 'ping') {
+      if (String(vehicleId) !== String(vehicle.id)) return;
+
+      if (type === 'heartbeat' || type === 'ping' || type === 'state') {
         setVehicle(prev => ({ ...prev, connected: true, lastHeartbeat: Date.now() }));
         return;
       }
@@ -131,7 +135,7 @@ export default function App() {
   // Check for vehicle heartbeat timeout
   useEffect(() => {
     const interval = setInterval(() => {
-      if (vehicle.connected && (Date.now() - vehicle.lastHeartbeat > 3000)) {
+      if (vehicle.connected && (Date.now() - vehicle.lastHeartbeat > 10000)) {
         setVehicle(prev => ({ ...prev, connected: false }));
       }
     }, 1000); // Check every second
@@ -315,13 +319,8 @@ export default function App() {
                     <label className="text-[9px] font-mono text-zinc-400 col-span-1">Yaw</label>
                     <input type="range" min="0" max="180" step="1" key={`yaw-${vehicle.yaw}`} defaultValue={vehicle.yaw}
                       onChange={(e) => handleVehicleYawChange(parseInt(e.target.value))}
-                      className="col-span-4 h-1 bg-zinc-800 rounded-lg appearance-none cursor-pointer" />
-                  </div>
-                  <div className="grid grid-cols-5 items-center gap-2">
-                    <label className="text-[9px] font-mono text-zinc-400 col-span-1">Pitch</label>
-                    <input type="range" min="0" max="180" step="1" key={`pitch-${vehicle.pitch}`} defaultValue={vehicle.pitch}
-                      onChange={(e) => handleVehiclePitchChange(parseInt(e.target.value))}
-                      className="col-span-4 h-1 bg-zinc-800 rounded-lg appearance-none cursor-pointer" />
+                      className="col-span-3 h-1 bg-zinc-800 rounded-lg appearance-none cursor-pointer" />
+                    <button onClick={() => handleVehicleYawChange(90)} className="text-[9px] font-mono p-1 bg-zinc-800 rounded hover:bg-zinc-700 uppercase">HOME</button>
                   </div>
                 </div>
 
@@ -382,10 +381,6 @@ export default function App() {
                     <div className="p-2 bg-zinc-950 rounded-xl border border-zinc-800 flex flex-col items-center">
                       <span className="text-[8px] font-mono text-zinc-500 uppercase tracking-widest">Yaw</span>
                       <span className="text-xs font-bold font-mono text-zinc-100 mt-1">{vehicle.yaw}°</span>
-                    </div>
-                    <div className="p-2 bg-zinc-950 rounded-xl border border-zinc-800 flex flex-col items-center">
-                      <span className="text-[8px] font-mono text-zinc-500 uppercase tracking-widest">Pitch</span>
-                      <span className="text-xs font-bold font-mono text-zinc-100 mt-1">{vehicle.pitch}°</span>
                     </div>
                   </div>
                 </div>
@@ -452,11 +447,6 @@ export default function App() {
                     <Cpu size={12} className="text-zinc-500 mb-1" />
                     <div className="text-[8px] font-mono text-zinc-500 uppercase">Yaw</div>
                     <div className="text-xs font-bold font-mono">{vehicle.yaw}°</div>
-                  </div>
-                  <div className="p-2 bg-zinc-950 rounded-xl border border-zinc-800">
-                    <Thermometer size={12} className="text-zinc-500 mb-1" />
-                    <div className="text-[8px] font-mono text-zinc-500 uppercase">Pitch</div>
-                    <div className="text-xs font-bold font-mono">{vehicle.pitch}°</div>
                   </div>
                 </div>
               </div>

@@ -33,13 +33,13 @@ VEHICLE_IDS = ["0"]
 
 SAVED_RIDE_ANGLE_PROFILES: dict[str, list[dict[str, int | str]]] = {
     "default": [
-        {"sensor_id": "Station1", "yaw": 90, "pitch": 90},
-        {"sensor_id": "Switch1", "yaw": 120, "pitch": 90},
-        {"sensor_id": "Switch2", "yaw": 60, "pitch": 90},
-        {"sensor_id": "Rotate1", "yaw": 90, "pitch": 90},
-        {"sensor_id": "Drop1", "yaw": 90, "pitch": 65},
-        {"sensor_id": "Drop2", "yaw": 90, "pitch": 65},
-        {"sensor_id": "Station2", "yaw": 90, "pitch": 90},
+        {"sensor_id": "Station1", "yaw": 90},
+        {"sensor_id": "Switch1", "yaw": 120},
+        {"sensor_id": "Switch2", "yaw": 60},
+        {"sensor_id": "Rotate1", "yaw": 90},
+        {"sensor_id": "Drop1", "yaw": 90},
+        {"sensor_id": "Drop2", "yaw": 90},
+        {"sensor_id": "Station2", "yaw": 90},
     ],
 }
 
@@ -49,9 +49,9 @@ SWITCH_TRACK_DIVERGE_ANGLE = 90
 SWITCH_TRACK_REVERSE_SPEED = -90
 
 STATION_TO_SWITCH_TIMED_SEQUENCE = [
-    {"delay": 0.0, "speed": 90, "yaw": 90, "pitch": 100},
-    {"delay": 1.0, "yaw": 120, "pitch": 80},
-    {"delay": 2.5, "yaw": 60, "pitch": 110},
+    {"delay": 0.0, "speed": 90, "yaw": 90},
+    {"delay": 1.0, "yaw": 120},
+    {"delay": 2.5, "yaw": 60},
 ]
 
 ride_mode = "manual"
@@ -61,7 +61,6 @@ vehicles: dict[str, dict[str, Any]] = {
     vehicle_id: {
         "drive": {"speed": 0, "left_speed": 0, "right_speed": 0, "moving": False},
         "servoYaw": {"angle": 90},
-        "servoPitch": {"angle": 90},
         "last_seen": 0.0,
     }
     for vehicle_id in VEHICLE_IDS
@@ -175,15 +174,12 @@ def apply_saved_ride_angles(vehicle_id: str, sensor_id: str) -> None:
             continue
 
         yaw = int(waypoint["yaw"])
-        pitch = int(waypoint["pitch"])
         set_yaw(vehicle_id, yaw)
-        set_pitch(vehicle_id, pitch)
         print(
             "Applied saved ride angles:",
             ACTIVE_RIDE_PROFILE,
             sensor_id,
             f"yaw={yaw}",
-            f"pitch={pitch}",
         )
         return
 
@@ -235,9 +231,6 @@ def schedule_station_to_switch_sequence(vehicle_id: str) -> None:
             if "yaw" in sequence_step:
                 set_yaw(vehicle_id, int(sequence_step["yaw"]))
 
-            if "pitch" in sequence_step:
-                set_pitch(vehicle_id, int(sequence_step["pitch"]))
-
         schedule_action(delay, run_step)
 
     print("Scheduled station-to-switch timed sequence")
@@ -252,7 +245,6 @@ def handle_vehicle_state(topic: str, data: dict[str, Any]) -> None:
         vehicles[vehicle_id] = {
             "drive": {},
             "servoYaw": {},
-            "servoPitch": {},
             "last_seen": 0.0,
         }
 
@@ -359,36 +351,29 @@ def set_yaw(vehicle_id: str, angle: int) -> None:
     )
 
 
-def set_pitch(vehicle_id: str, angle: int) -> None:
-    publish_json(
-        f"ride/vehicle/{vehicle_id}/servoPitch/command",
-        {"angle": angle},
-    )
-
-
 def command_switch_track(target_angle: int) -> None:
-    publish_json(
-        "ride/actuator/switchTrack/command",
-        {"target_angle": target_angle},
-    )
+    payload = {"target_angle": target_angle}
+    publish_json("ride/actuator/switchTrack/command", payload)
+    # Also publish state so UI highlights
+    publish_json("ride/actuator/switchTrack/state", {"angle": target_angle, "moving": False})
 
 
 def command_turntable(target_angle: int) -> None:
-    publish_json(
-        "ride/actuator/rotateTrack/command",
-        {"target_angle": target_angle},
-    )
+    payload = {"target_angle": target_angle}
+    publish_json("ride/actuator/rotateTrack/command", payload)
+    # Also publish state so UI highlights
+    publish_json("ride/actuator/rotateTrack/state", {"angle": target_angle, "moving": False})
 
 
 def command_drop_track(target: str, motor_a_speed: int, motor_b_speed: int) -> None:
-    publish_json(
-        "ride/actuator/dropTrack/command",
-        {
-            "target": target,
-            "motor_a_speed": motor_a_speed,
-            "motor_b_speed": motor_b_speed,
-        },
-    )
+    payload = {
+        "target": target,
+        "motor_a_speed": motor_a_speed,
+        "motor_b_speed": motor_b_speed,
+    }
+    publish_json("ride/actuator/dropTrack/command", payload)
+    # Also publish state so UI highlights
+    publish_json("ride/actuator/dropTrack/state", {"target": target, "moving": False})
 
 
 def stop_all_vehicles() -> None:
