@@ -9,7 +9,8 @@ instead of motor timer rotation.
 
 PCA CHANNELS:
 CH0 = Switch Track Servo
-CH8 = Turntable Servo
+CH8 = Turntable Servo (NOTE: Handled via PCA or Direct Pin?)
+// *We are using direct Arduino Pin 10 for Turntable based on logic below*
 
 MQTT:
 ride/actuator/rotateTrack/command
@@ -24,6 +25,7 @@ ride/actuator/rotateTrack/command
 #include <ArduinoJson.h>
 #include <Wire.h>
 #include <Adafruit_PWMServoDriver.h>
+#include <Servo.h>
 
 const char* WIFI_SSID     = "TPED";
 const char* WIFI_PASSWORD = "TPEDwifi";
@@ -35,15 +37,16 @@ WiFiClient wifiClient;
 PubSubClient mqttClient(wifiClient);
 
 Adafruit_PWMServoDriver pwm = Adafruit_PWMServoDriver(0x40);
+Servo turnServoHardware;
 
 // =====================================================
 // CHANNELS
 // =====================================================
 
-const int SWITCH_SERVO = 0;
-const int TURN_SERVO   = 10;
+const int SWITCH_SERVO = 0;   // On PCA9685 Channel 0
+const int TURN_SERVO   = 10;  // On Arduino Digital Pin 10
 
-// Drop motors
+// Drop motors (PCA Channels)
 const int DL_FWD = 3;
 const int DL_REV = 4;
 const int DR_FWD = 1;
@@ -54,18 +57,18 @@ const int DR_REV = 2;
 // =====================================================
 
 // Switch Track Calibration
-const int SWITCH_MIN = 110;
-const int SWITCH_MAX = 900;
+const int SWITCH_MIN = 150;
+const int SWITCH_MAX = 980;
 
 // Turntable Calibration
-const int TURN_MIN = 120;
-const int TURN_MAX = 620;
+const int TURN_MIN = 0;
+const int TURN_MAX = 780;
 
-// switch track
+// switch track states
 int switchCurrent = 0;
 int switchTarget  = 0;
 
-// turntable
+// turntable states
 int turnCurrent = 0;
 int turnTarget  = 0;
 
@@ -87,7 +90,7 @@ const int SENSOR_STATION      = 4;
 const int SENSOR_SWITCH1      = 5;
 const int SENSOR_SWITCH2      = 6;
 const int SENSOR_ROTATE1      = 7;
-const int SENSOR_DROP2_TOP    = 10;
+const int SENSOR_DROP2_TOP    = 8;  // MOVED FROM 10 TO 8 TO PREVENT SERVO CONFLICT
 const int SENSOR_DROP1_BOTTOM = 11;
 
 bool lastStation = HIGH;
@@ -124,16 +127,14 @@ int angleToPulse(int angle, int minPulse, int maxPulse)
 
 void setServoChannel(int ch, int angle)
 {
-  int pulse;
-  if (ch == SWITCH_SERVO) {
-    pulse = angleToPulse(angle, SWITCH_MIN, SWITCH_MAX);
-  } else if (ch == TURN_SERVO) {
-    pulse = angleToPulse(angle, TURN_MIN, TURN_MAX);
-  } else {
-    // Default fallback
-    pulse = angleToPulse(angle, 120, 620);
+  if (ch == TURN_SERVO) {
+    // Turntable is direct on Arduino Pin 10
+    turnServoHardware.write(angle);
+  } else if (ch == SWITCH_SERVO) {
+    // Switch Track is on PCA9685 Channel 0
+    int pulse = angleToPulse(angle, SWITCH_MIN, SWITCH_MAX);
+    pwm.setPWM(ch, 0, pulse);
   }
-  pwm.setPWM(ch, 0, pulse);
 }
 
 // =====================================================
@@ -240,7 +241,7 @@ void mqttCallback(char* topic, byte* payload, unsigned int length)
   Serial.print("MQTT [");
   Serial.print(t);
   Serial.print("] Payload: ");
-  for (int i = 0; i < length; i++) Serial.print((char)payload[i]);
+  for (unsigned int i = 0; i < length; i++) Serial.print((char)payload[i]);
   Serial.println();
 
   StaticJsonDocument<256> doc;
@@ -415,6 +416,9 @@ void setup()
   pwm.begin();
   pwm.setPWMFreq(50);   // servos need 50Hz
 
+  // Attach the single hardware servo object to Pin 10
+  turnServoHardware.attach(TURN_SERVO);
+
   stopDrop();
 
   setServoChannel(SWITCH_SERVO, 0);
@@ -439,7 +443,7 @@ void setup()
   pinMode(SENSOR_SWITCH1, INPUT_PULLUP);
   pinMode(SENSOR_SWITCH2, INPUT_PULLUP);
   pinMode(SENSOR_ROTATE1, INPUT_PULLUP);
-  pinMode(SENSOR_DROP2_TOP, INPUT_PULLUP);
+  pinMode(SENSOR_DROP2_TOP, INPUT_PULLUP);    // Now running safely on Pin 8
   pinMode(SENSOR_DROP1_BOTTOM, INPUT_PULLUP);
 
   dropCount = DROP_TOP;
@@ -465,7 +469,7 @@ void loop()
 
   checkSensors();
 
-  // smooth switch servo
+  // smooth switch servo (PCA9685)
   if (switchCurrent < switchTarget)
   {
     switchCurrent++;
@@ -479,7 +483,7 @@ void loop()
     delay(10);
   }
 
-  // smooth turntable servo
+  // smooth turntable servo (Arduino Pin 10)
   if (turnCurrent < turnTarget)
   {
     turnCurrent++;
